@@ -1,0 +1,85 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            artifact: iflow2api.exe
+          - os: macos-latest
+            platform: macos
+            artifact: iflow2api.app
+          - os: ubuntu-latest
+            platform: linux
+            artifact: iflow2api
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flet
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmpv1
+
+      - name: Build with Flet
+        run: |
+          flet build ${{ matrix.platform }} --project iflow2api --module-name iflow2api.gui --product iflow2api
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: iflow2api-${{ matrix.platform }}
+          path: build/${{ matrix.platform }}/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create archives
+        run: |
+          cd artifacts
+          zip -r iflow2api-windows.zip iflow2api-windows/
+          tar -czvf iflow2api-macos.tar.gz iflow2api-macos/
+          tar -czvf iflow2api-linux.tar.gz iflow2api-linux/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/iflow2api-windows.zip
+            artifacts/iflow2api-macos.tar.gz
+            artifacts/iflow2api-linux.tar.gz
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

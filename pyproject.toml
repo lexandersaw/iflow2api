@@ -10,6 +10,7 @@ dependencies = [
     "httpx>=0.28.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
+    "flet>=0.25.0",
 ]
 
 [project.optional-dependencies]
@@ -17,9 +18,13 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
 ]
+build = [
+    "pyinstaller>=6.0.0",
+]
 
 [project.scripts]
 iflow2api = "iflow2api.main:main"
+iflow2api-gui = "iflow2api.gui:main"
 
 [build-system]
 requires = ["hatchling"]
