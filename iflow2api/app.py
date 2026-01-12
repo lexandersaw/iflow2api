@@ -208,9 +208,9 @@ def main():
     print("=" * 50)
     print()
 
-    # 启动服务
+    # 启动服务 - 直接传入 app 对象而非字符串，避免打包后导入失败
     uvicorn.run(
-        "iflow2api.app:app",
+        app,
         host="0.0.0.0",
         port=8000,
         reload=False,

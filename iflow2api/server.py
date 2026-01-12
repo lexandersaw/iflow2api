@@ -1,6 +1,7 @@
 """服务管理 - 在后台线程运行 uvicorn"""
 
 import asyncio
+import socket
 import threading
 import time
 from enum import Enum
@@ -18,6 +19,16 @@ class ServerState(Enum):
     RUNNING = "running"
     STOPPING = "stopping"
     ERROR = "error"
+
+
+def is_port_available(host: str, port: int) -> bool:
+    """检查端口是否可用"""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind((host if host != "0.0.0.0" else "127.0.0.1", port))
+            return True
+    except OSError:
+        return False
 
 
 class ServerManager:
@@ -43,7 +54,10 @@ class ServerManager:
         self._state = state
         self._error_message = message
         if self._on_state_change:
-            self._on_state_change(state, message)
+            try:
+                self._on_state_change(state, message)
+            except Exception:
+                pass  # 忽略回调错误，避免崩溃
 
     def start(self, settings: AppSettings) -> bool:
         """启动服务"""
@@ -52,6 +66,11 @@ class ServerManager:
 
         if not settings.api_key:
             self._set_state(ServerState.ERROR, "API Key 未配置")
+            return False
+
+        # 检查端口是否可用
+        if not is_port_available(settings.host, settings.port):
+            self._set_state(ServerState.ERROR, f"端口 {settings.port} 已被占用")
             return False
 
         self._settings = settings
@@ -92,8 +111,6 @@ class ServerManager:
             )
 
             # 替换 load_iflow_config 函数
-            original_load = config_module.load_iflow_config
-
             def patched_load():
                 return custom_config
 
@@ -104,9 +121,12 @@ class ServerManager:
             app_module._proxy = None
             app_module._config = None
 
-            # 配置 uvicorn
+            # 直接导入 app 对象，避免打包后字符串导入失败
+            from .app import app
+
+            # 配置 uvicorn - 直接传入 app 对象而非字符串
             config = uvicorn.Config(
-                "iflow2api.app:app",
+                app,
                 host=self._settings.host,
                 port=self._settings.port,
                 log_level="info",
@@ -119,6 +139,12 @@ class ServerManager:
             # 运行服务
             asyncio.run(self._server.serve())
 
+        except OSError as e:
+            # 端口绑定错误
+            if "address already in use" in str(e).lower() or "通常每个套接字地址" in str(e):
+                self._set_state(ServerState.ERROR, f"端口 {self._settings.port} 已被占用")
+            else:
+                self._set_state(ServerState.ERROR, str(e))
         except Exception as e:
             self._set_state(ServerState.ERROR, str(e))
         finally:

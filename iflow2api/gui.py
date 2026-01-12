@@ -3,6 +3,7 @@
 import flet as ft
 from datetime import datetime
 from typing import Optional
+import threading
 
 from .settings import (
     AppSettings,
@@ -21,7 +22,7 @@ class IFlow2ApiApp:
     def __init__(self, page: ft.Page):
         self.page = page
         self.settings = load_settings()
-        self.server = ServerManager(on_state_change=self._on_server_state_change)
+        self.server = ServerManager(on_state_change=self._on_server_state_change_threadsafe)
 
         # UI 组件
         self.status_icon: Optional[ft.Icon] = None
@@ -239,8 +240,24 @@ class IFlow2ApiApp:
             self.log_list.controls.pop(0)
         self.page.update()
 
+    def _on_server_state_change_threadsafe(self, state: ServerState, message: str):
+        """服务状态变化回调 - 线程安全版本，从后台线程调用"""
+        # 使用 page.run_thread_safe 确保 UI 更新在主线程执行
+        def update_ui():
+            self._on_server_state_change(state, message)
+
+        # Flet 的线程安全调用方式
+        try:
+            self.page.run_thread_safe(update_ui)
+        except Exception:
+            # 如果 run_thread_safe 不可用，尝试直接调用（可能在主线程）
+            try:
+                self._on_server_state_change(state, message)
+            except Exception:
+                pass
+
     def _on_server_state_change(self, state: ServerState, message: str):
-        """服务状态变化回调"""
+        """服务状态变化回调 - 必须在主线程调用"""
         state_config = {
             ServerState.STOPPED: (ft.Colors.GREY, "服务未运行"),
             ServerState.STARTING: (ft.Colors.ORANGE, "服务启动中..."),
