@@ -1,6 +1,6 @@
 [project]
 name = "iflow2api"
-version = "0.1.0"
+version = "0.2.0"
 description = "将 iFlow CLI 的 AI 服务暴露为 OpenAI 兼容 API"
 readme = "README.md"
 requires-python = ">=3.10"
