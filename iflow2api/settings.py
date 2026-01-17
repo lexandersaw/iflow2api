@@ -2,7 +2,6 @@
 
 import json
 import sys
-import winreg
 from pathlib import Path
 from typing import Optional
 
@@ -86,6 +85,8 @@ def set_auto_start(enabled: bool) -> bool:
     if sys.platform != "win32":
         return False
 
+    import winreg
+
     app_name = "iflow2api"
     exe_path = get_exe_path()
 
@@ -115,6 +116,8 @@ def get_auto_start() -> bool:
     """检查是否已设置开机自启动"""
     if sys.platform != "win32":
         return False
+
+    import winreg
 
     app_name = "iflow2api"
 

@@ -13,15 +13,34 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build & Run Commands
 
-```bash
-# 安装依赖
-uv pip install -e .
+### 环境设置（推荐使用 uv）
 
-# 运行服务
+```bash
+# 安装 uv (如果未安装)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 创建虚拟环境（自动识别 .python-version）
+uv venv
+
+# 安装项目依赖
+uv sync
+
+# 激活虚拟环境（可选，uv run 会自动使用）
+source .venv/bin/activate  # Linux/Mac
+# 或 .venv\Scripts\activate  # Windows
+```
+
+### 运行服务
+
+```bash
+# 使用 uv 运行（推荐）
+uv run python -m iflow2api
+
+# 或激活虚拟环境后直接运行
 python -m iflow2api
 
 # 或指定端口
-python -c "import uvicorn; from iflow2api.app import app; uvicorn.run(app, host='0.0.0.0', port=8001)"
+uv run python -c "import uvicorn; from iflow2api.app import app; uvicorn.run(app, host='0.0.0.0', port=8001)"
 
 # 测试
 curl http://localhost:8001/health
