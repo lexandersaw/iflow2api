@@ -244,6 +244,25 @@ iflow2api/
 
 可以。两种登录方式都使用同一个配置文件 `~/.iflow/settings.json`，GUI 登录后命令行模式可以直接使用，反之亦然。
 
+### Q: macOS 上下载的应用无法执行
+
+如果在 macOS 上通过浏览器下载 `iflow2api.app` 后无法执行，通常有两个原因：
+
+1. **缺少执行权限**：可执行文件没有执行位
+2. **隔离标记**：文件带有 `com.apple.quarantine` 属性
+
+**修复方法**：
+
+```bash
+# 移除隔离标记
+xattr -cr iflow2api.app
+
+# 添加执行权限
+chmod +x iflow2api.app/Contents/MacOS/iflow2api
+```
+
+执行上述命令后，应用就可以正常运行了。
+
 ## License
 
 MIT
