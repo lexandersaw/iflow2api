@@ -13,14 +13,16 @@ from .config import load_iflow_config, save_iflow_config, IFlowConfig
 class OAuthLoginHandler:
     """OAuth 登录处理器"""
 
-    def __init__(self, add_log_callback):
+    def __init__(self, add_log_callback, success_callback=None):
         """
         初始化 OAuth 登录处理器
 
         Args:
             add_log_callback: 添加日志的回调函数
+            success_callback: 登录成功后的回调函数
         """
         self.add_log = add_log_callback
+        self.success_callback = success_callback
         self._is_logging_in = False  # 防止重复登录
 
     def start_login(self):
@@ -119,6 +121,10 @@ class OAuthLoginHandler:
                             f"登录成功！用户: {user_info.get('username', user_info.get('phone', 'Unknown'))}"
                         )
                         self.add_log(f"API Key: {api_key[:10]}...{api_key[-4:]}")
+
+                        # 通知 GUI 刷新 (在主线程中)
+                        if self.success_callback:
+                            self.success_callback(existing_config)
 
                         await oauth.close()
                     except Exception as ex:

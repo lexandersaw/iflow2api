@@ -379,7 +379,24 @@ class IFlow2ApiApp:
         """使用 iFlow OAuth 登录"""
         from .oauth_login import OAuthLoginHandler
 
-        handler = OAuthLoginHandler(self._add_log)
+        def on_login_success(config):
+            """OAuth 登录成功后的回调"""
+            # 更新 UI 字段
+            self.api_key_field.value = config.api_key
+            self.base_url_field.value = config.base_url
+            self._add_log("已更新配置到界面")
+
+            # 刷新界面
+            self.page.update()
+
+            # 显示成功提示
+            self.page.open(
+                ft.SnackBar(
+                    content=ft.Text("登录成功！配置已自动更新"), bgcolor=ft.Colors.GREEN
+                )
+            )
+
+        handler = OAuthLoginHandler(self._add_log, success_callback=on_login_success)
         handler.start_login()
 
 
