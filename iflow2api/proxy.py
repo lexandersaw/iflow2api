@@ -88,8 +88,7 @@ class IFlowProxy:
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(300.0, connect=10.0),
-                # 禁用自动重定向，避免 POST 被转换成 GET 导致 405
-                follow_redirects=False,
+                follow_redirects=True,
             )
         return self._client
 
