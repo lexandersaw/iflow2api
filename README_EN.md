@@ -106,6 +106,56 @@ python -c "import uvicorn; from iflow2api.app import app; uvicorn.run(app, host=
 | `/models`               | GET    | Compatible endpoint (without /v1 prefix)            |
 | `/chat/completions`     | POST   | Compatible endpoint (without /v1 prefix)            |
 
+## Advanced Configuration
+
+### Chain of Thought (CoT) Settings
+
+Some models (such as GLM-5, Kimi-K2-Thinking) support Chain of Thought functionality, returning a `reasoning_content` field in the response that shows the model's reasoning process.
+
+**Configuration**
+
+Edit the configuration file `~/.iflow2api/config.json`:
+
+```json
+{
+  "preserve_reasoning_content": true
+}
+```
+
+**Configuration Options**
+
+| Value | Behavior | Use Case |
+| ----- | -------- | -------- |
+| `false` (default) | Merges `reasoning_content` into the `content` field | OpenAI-compatible clients that only need the final answer |
+| `true` | Preserves `reasoning_content` field, also copies to `content` | Clients that need to display reasoning process and answer separately |
+
+**Response Format Comparison**
+
+Default mode (`preserve_reasoning_content: false`):
+```json
+{
+  "choices": [{
+    "message": {
+      "content": "Reasoning process...\n\nFinal answer..."
+    }
+  }]
+}
+```
+
+Preserve mode (`preserve_reasoning_content: true`):
+```json
+{
+  "choices": [{
+    "message": {
+      "content": "Final answer...",
+      "reasoning_content": "Reasoning process..."
+    }
+  }]
+}
+```
+
+> **Note**: Even with preserve mode enabled, the `content` field will still be populated to ensure clients that only read `content` work correctly.
+
 ## Client Configuration Examples
 
 ### Python (OpenAI SDK)

@@ -106,6 +106,56 @@ python -c "import uvicorn; from iflow2api.app import app; uvicorn.run(app, host=
 | `/models`              | GET  | 兼容端点 (不带 /v1 前缀)                        |
 | `/chat/completions`    | POST | 兼容端点 (不带 /v1 前缀)                        |
 
+## 高级配置
+
+### 思考链（Chain of Thought）设置
+
+某些模型（如 GLM-5、Kimi-K2-Thinking）支持思考链功能，会在响应中返回 `reasoning_content` 字段，展示模型的推理过程。
+
+**配置方式**
+
+编辑配置文件 `~/.iflow2api/config.json`：
+
+```json
+{
+  "preserve_reasoning_content": true
+}
+```
+
+**配置说明**
+
+| 配置值 | 行为 | 适用场景 |
+| ------ | ---- | -------- |
+| `false`（默认） | 将 `reasoning_content` 合并到 `content` 字段 | OpenAI 兼容客户端，只需最终回答 |
+| `true` | 保留 `reasoning_content` 字段，同时复制到 `content` | 需要分别显示思考过程和回答的客户端 |
+
+**响应格式对比**
+
+默认模式（`preserve_reasoning_content: false`）：
+```json
+{
+  "choices": [{
+    "message": {
+      "content": "思考过程...\n\n最终回答..."
+    }
+  }]
+}
+```
+
+保留模式（`preserve_reasoning_content: true`）：
+```json
+{
+  "choices": [{
+    "message": {
+      "content": "最终回答...",
+      "reasoning_content": "思考过程..."
+    }
+  }]
+}
+```
+
+> **注意**：即使开启保留模式，`content` 字段也会被填充，以确保只读取 `content` 的客户端能正常工作。
+
 ## 客户端配置示例
 
 ### Python (OpenAI SDK)

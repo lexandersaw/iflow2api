@@ -100,13 +100,18 @@ class IFlowProxy:
         return self._client
 
     @staticmethod
-    def _normalize_response(result: dict) -> dict:
+    def _normalize_response(result: dict, preserve_reasoning: bool = False) -> dict:
         """
         规范化 OpenAI 格式响应
         
         某些模型（如 GLM-5）使用 reasoning_content 而非 content 返回内容，
         导致 OpenAI 兼容客户端无法读取助手消息。
-        此方法确保 content 字段始终包含有效内容。
+        
+        Args:
+            result: OpenAI 格式响应
+            preserve_reasoning: 是否保留 reasoning_content 字段
+                - False（默认）: 将 reasoning_content 合并到 content，确保兼容性
+                - True: 保留 reasoning_content 字段，客户端可分别处理思考过程和最终回答
         """
         choices = result.get("choices", [])
         for choice in choices:
@@ -115,12 +120,23 @@ class IFlowProxy:
             reasoning_content = message.get("reasoning_content")
             
             if not content and reasoning_content:
-                # content 为空但 reasoning_content 有值 → 移动到 content
-                print(f"[iflow2api] 规范化: reasoning_content → content (len={len(reasoning_content)})")
-                message["content"] = reasoning_content
+                # content 为空但 reasoning_content 有值
+                if preserve_reasoning:
+                    # 保留 reasoning_content，同时复制到 content 以确保兼容性
+                    print(f"[iflow2api] 保留思考链: reasoning_content (len={len(reasoning_content)}) → content")
+                    message["content"] = reasoning_content
+                else:
+                    # 将 reasoning_content 移动到 content（删除原字段）
+                    print(f"[iflow2api] 合并思考链: reasoning_content → content (len={len(reasoning_content)})")
+                    message["content"] = reasoning_content
+                    del message["reasoning_content"]
             elif content and reasoning_content:
-                # 两者都有值 → 保留 content，记录日志
-                print(f"[iflow2api] 响应包含 content(len={len(content)}) 和 reasoning_content(len={len(reasoning_content)})")
+                # 两者都有值
+                if preserve_reasoning:
+                    print(f"[iflow2api] 响应包含 content(len={len(content)}) 和 reasoning_content(len={len(reasoning_content)})")
+                else:
+                    print(f"[iflow2api] 合并思考链: 删除 reasoning_content，保留 content(len={len(content)})")
+                    del message["reasoning_content"]
             elif not content and not reasoning_content:
                 print(f"[iflow2api] 警告: message 中 content 和 reasoning_content 均为空")
                 print(f"[iflow2api] message keys: {list(message.keys())}")
@@ -128,13 +144,15 @@ class IFlowProxy:
         return result
 
     @staticmethod
-    def _normalize_stream_chunk(chunk_data: dict) -> dict:
+    def _normalize_stream_chunk(chunk_data: dict, preserve_reasoning: bool = False) -> dict:
         """
         规范化流式响应中的 delta
         
-        将 delta 中的 reasoning_content 移动到 content（不保留 reasoning_content）。
-        这确保只看 content 字段的 OpenAI 兼容客户端能正常工作，
-        同时避免内容重复（reasoning_content 和 content 显示同样的文本）。
+        Args:
+            chunk_data: OpenAI 流式响应 chunk
+            preserve_reasoning: 是否保留 reasoning_content 字段
+                - False（默认）: 将 reasoning_content 合并到 content，确保兼容性
+                - True: 保留 reasoning_content 字段，客户端可分别处理思考过程和最终回答
         """
         choices = chunk_data.get("choices", [])
         for choice in choices:
@@ -143,8 +161,15 @@ class IFlowProxy:
             reasoning_content = delta.get("reasoning_content")
             
             if not content and reasoning_content:
-                # 将 reasoning_content 移动到 content
-                delta["content"] = reasoning_content
+                if preserve_reasoning:
+                    # 保留 reasoning_content，同时复制到 content 以确保兼容性
+                    delta["content"] = reasoning_content
+                else:
+                    # 将 reasoning_content 移动到 content（删除原字段）
+                    delta["content"] = reasoning_content
+                    del delta["reasoning_content"]
+            elif content and reasoning_content and not preserve_reasoning:
+                # 两者都有值，但不保留 reasoning_content
                 del delta["reasoning_content"]
         
         return chunk_data
@@ -245,60 +270,62 @@ class IFlowProxy:
             流式: 返回字节流迭代器
         """
         client = await self._get_client()
+        
+        # 加载配置以获取思考链设置
+        from .settings import load_settings
+        settings = load_settings()
+        preserve_reasoning = settings.preserve_reasoning_content
 
         if stream:
-            # 对于流式请求，我们需要在返回迭代器之前检查状态码
-            # 使用上下文管理器手动控制响应
-            response = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=self._get_headers(),
-                json=request_body,
-                timeout=httpx.Timeout(300.0, connect=10.0),
-            )
-            try:
-                response.raise_for_status()
-                # 记录上游响应信息以便调试
-                content_type = response.headers.get("content-type", "unknown")
-                print(f"[iflow2api] 上游响应: status={response.status_code}, content-type={content_type}")
-                
-                # 如果上游没有返回 SSE 流（可能是 JSON 错误），读取并处理
-                if "text/event-stream" not in content_type and "application/octet-stream" not in content_type:
-                    # 上游返回了非流式响应（可能是错误）
-                    raw_body = await response.aread()
-                    body_str = raw_body.decode("utf-8", errors="replace")
-                    print(f"[iflow2api] 上游非流式响应体: {body_str[:500]}")
-                    try:
-                        error_data = json.loads(body_str)
-                        error_msg = error_data.get("msg") or error_data.get("error", {}).get("message") or body_str[:200]
-                    except json.JSONDecodeError:
-                        error_msg = body_str[:200] or "上游返回空响应"
-                    
-                    async def error_generator():
-                        # 生成一个包含错误信息的 SSE chunk，让客户端至少能收到内容
-                        error_chunk = {
-                            "id": f"error-{int(time.time())}",
-                            "object": "chat.completion.chunk",
-                            "created": int(time.time()),
-                            "model": request_body.get("model", "unknown"),
-                            "choices": [{
-                                "index": 0,
-                                "delta": {"content": f"[API Error] {error_msg}"},
-                                "finish_reason": "stop"
-                            }]
-                        }
-                        yield ("data: " + json.dumps(error_chunk, ensure_ascii=False) + "\n\n").encode("utf-8")
-                        yield b"data: [DONE]\n\n"
-                    
-                    await response.aclose()
-                    return error_generator()
-                
-                # 如果成功，返回一个生成器来迭代内容
-                # 注意：我们需要确保 response 在迭代完之前不被关闭
-                async def content_generator():
-                    buffer = b""
-                    chunk_count = 0
-                    chunk_count = 0
-                    try:
+            # 对于流式请求，使用 httpx 的 stream 方法实现真正的流式传输
+            # 注意：不能使用 await client.post()，因为它会等待整个响应体下载完成
+            async def stream_generator():
+                buffer = b""
+                chunk_count = 0
+                try:
+                    async with client.stream(
+                        "POST",
+                        f"{self.base_url}/chat/completions",
+                        headers=self._get_headers(),
+                        json=request_body,
+                        timeout=httpx.Timeout(300.0, connect=10.0),
+                    ) as response:
+                        # 检查状态码
+                        response.raise_for_status()
+                        
+                        # 记录上游响应信息以便调试
+                        content_type = response.headers.get("content-type", "unknown")
+                        print(f"[iflow2api] 上游响应: status={response.status_code}, content-type={content_type}")
+                        
+                        # 如果上游没有返回 SSE 流（可能是 JSON 错误），读取并处理
+                        if "text/event-stream" not in content_type and "application/octet-stream" not in content_type:
+                            # 上游返回了非流式响应（可能是错误）
+                            raw_body = await response.aread()
+                            body_str = raw_body.decode("utf-8", errors="replace")
+                            print(f"[iflow2api] 上游非流式响应体: {body_str[:500]}")
+                            try:
+                                error_data = json.loads(body_str)
+                                error_msg = error_data.get("msg") or error_data.get("error", {}).get("message") or body_str[:200]
+                            except json.JSONDecodeError:
+                                error_msg = body_str[:200] or "上游返回空响应"
+                            
+                            # 生成一个包含错误信息的 SSE chunk
+                            error_chunk = {
+                                "id": f"error-{int(time.time())}",
+                                "object": "chat.completion.chunk",
+                                "created": int(time.time()),
+                                "model": request_body.get("model", "unknown"),
+                                "choices": [{
+                                    "index": 0,
+                                    "delta": {"content": f"[API Error] {error_msg}"},
+                                    "finish_reason": "stop"
+                                }]
+                            }
+                            yield ("data: " + json.dumps(error_chunk, ensure_ascii=False) + "\n\n").encode("utf-8")
+                            yield b"data: [DONE]\n\n"
+                            return
+                        
+                        # 流式读取响应
                         async for chunk in response.aiter_bytes():
                             buffer += chunk
                             # 按行处理 SSE 数据
@@ -316,14 +343,15 @@ class IFlowProxy:
                                         continue
                                     try:
                                         chunk_data = json.loads(data_str)
-                                        chunk_data = self._normalize_stream_chunk(chunk_data)
+                                        chunk_data = self._normalize_stream_chunk(chunk_data, preserve_reasoning)
                                         yield ("data: " + json.dumps(chunk_data, ensure_ascii=False) + "\n\n").encode("utf-8")
                                     except (json.JSONDecodeError, Exception):
                                         # 无法解析的 chunk 原样传递
                                         yield (line_str + "\n").encode("utf-8")
                                 else:
                                     yield (line_str + "\n").encode("utf-8")
-                            # 处理 buffer 中剩余数据（不以 \n 结尾的最后部分）
+                        
+                        # 处理 buffer 中剩余数据（不以 \n 结尾的最后部分）
                         if buffer:
                             line_str = buffer.decode("utf-8", errors="replace").strip()
                             if line_str.startswith("data:"):
@@ -331,7 +359,7 @@ class IFlowProxy:
                                 if data_str != "[DONE]":
                                     try:
                                         chunk_data = json.loads(data_str)
-                                        chunk_data = self._normalize_stream_chunk(chunk_data)
+                                        chunk_data = self._normalize_stream_chunk(chunk_data, preserve_reasoning)
                                         yield ("data: " + json.dumps(chunk_data, ensure_ascii=False) + "\n\n").encode("utf-8")
                                     except (json.JSONDecodeError, Exception):
                                         yield (line_str + "\n").encode("utf-8")
@@ -339,15 +367,17 @@ class IFlowProxy:
                                     yield b"data: [DONE]\n\n"
                             elif line_str:
                                 yield (line_str + "\n").encode("utf-8")
-                    finally:
-                        if chunk_count == 0:
-                            print(f"[iflow2api] 警告: 上游流式响应为空 (0 chunks)")
-                        await response.aclose()
-                
-                return content_generator()
-            except Exception:
-                await response.aclose()
-                raise
+                                
+                except Exception as e:
+                    print(f"[iflow2api] 流式请求错误: {e}")
+                    raise
+                finally:
+                    if chunk_count == 0:
+                        print(f"[iflow2api] 警告: 上游流式响应为空 (0 chunks)")
+                    else:
+                        print(f"[iflow2api] 流式完成: 共 {chunk_count} chunks")
+            
+            return stream_generator()
         else:
             response = await client.post(
                 f"{self.base_url}/chat/completions",
@@ -368,7 +398,7 @@ class IFlowProxy:
             # 规范化响应: 确保 content 字段有效
             # GLM-5 等推理模型可能只返回 reasoning_content 而 content 为 null
             # OpenAI 兼容客户端（如 Kilo Code）只检查 content 字段
-            result = self._normalize_response(result)
+            result = self._normalize_response(result, preserve_reasoning)
 
             return result
 
@@ -395,21 +425,23 @@ class IFlowProxy:
         url = f"{self.base_url}{path}"
 
         if stream and method.upper() == "POST":
-            response = await client.post(
-                url, headers=self._get_headers(), json=body, timeout=httpx.Timeout(300.0, connect=10.0)
-            )
-            try:
-                response.raise_for_status()
-                async def content_generator():
-                    try:
+            # 使用 httpx 的 stream 方法实现真正的流式传输
+            async def stream_gen():
+                try:
+                    async with client.stream(
+                        "POST",
+                        url,
+                        headers=self._get_headers(),
+                        json=body,
+                        timeout=httpx.Timeout(300.0, connect=10.0),
+                    ) as response:
+                        response.raise_for_status()
                         async for chunk in response.aiter_bytes():
                             yield chunk
-                    finally:
-                        await response.aclose()
-                return content_generator()
-            except Exception:
-                await response.aclose()
-                raise
+                except Exception as e:
+                    print(f"[iflow2api] proxy_request 流式错误: {e}")
+                    raise
+            return stream_gen()
 
         if method.upper() == "GET":
             response = await client.get(url, headers=self._get_headers())

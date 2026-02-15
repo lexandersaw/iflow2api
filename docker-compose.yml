@@ -1,0 +1,47 @@
+# iFlow2API Docker Compose 配置
+# 用于快速部署 iFlow2API 服务
+
+version: '3.8'
+
+services:
+  iflow2api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: iflow2api:latest
+    container_name: iflow2api
+    restart: unless-stopped
+    ports:
+      - "28000:28000"
+    environment:
+      # 服务配置
+      - HOST=0.0.0.0
+      - PORT=28000
+      # iFlow 配置 (可选，也可以通过挂载配置文件)
+      # - IFLOW_API_KEY=sk-xxx
+      # - IFLOW_BASE_URL=https://apis.iflow.cn/v1
+      # 速率限制配置
+      - RATE_LIMIT_ENABLED=true
+      - RATE_LIMIT_PER_MINUTE=60
+      - RATE_LIMIT_PER_HOUR=1000
+      - RATE_LIMIT_PER_DAY=10000
+    volumes:
+      # 挂载 iFlow 配置目录 (包含 API Key 和 OAuth Token)
+      - ~/.iflow:/home/appuser/.iflow:ro
+      # 挂载应用配置目录
+      - iflow2api-config:/home/appuser/.iflow2api
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:28000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  iflow2api-config:
+    driver: local

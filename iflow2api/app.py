@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from .config import load_iflow_config, check_iflow_login, IFlowConfig, save_iflow_config
 from .proxy import IFlowProxy
 from .token_refresher import OAuthTokenRefresher
+from .ratelimit import RateLimitConfig, init_limiter, create_rate_limit_middleware
 
 
 # ============ Anthropic 格式转换函数 ============
@@ -353,6 +354,20 @@ async def lifespan(app: FastAPI):
         _refresher.start()
         print(f"[iflow2api] 已启动 Token 自动刷新任务")
         
+        # 初始化速率限制器
+        from .settings import load_settings
+        settings = load_settings()
+        rate_limit_config = RateLimitConfig(
+            enabled=settings.rate_limit_enabled,
+            requests_per_minute=settings.rate_limit_per_minute,
+            requests_per_hour=settings.rate_limit_per_hour,
+            requests_per_day=settings.rate_limit_per_day,
+        )
+        init_limiter(rate_limit_config)
+        print(f"[iflow2api] 速率限制: {'已启用' if settings.rate_limit_enabled else '已禁用'}")
+        if settings.rate_limit_enabled:
+            print(f"[iflow2api] 限流规则: {settings.rate_limit_per_minute}/分钟, {settings.rate_limit_per_hour}/小时, {settings.rate_limit_per_day}/天")
+        
     except FileNotFoundError as e:
         print(f"[错误] {e}", file=sys.stderr)
         print("[提示] 请先运行 'iflow' 命令并完成登录", file=sys.stderr)
@@ -424,6 +439,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 添加速率限制中间件
+app.middleware("http")(create_rate_limit_middleware())
 
 
 @app.middleware("http")

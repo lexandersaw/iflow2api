@@ -15,6 +15,8 @@ from .settings import (
 )
 from .server import ServerManager, ServerState
 from .tray import TrayManager, is_tray_available
+from .i18n import t, set_language, get_available_languages
+from .ratelimit import RateLimitConfig, get_rate_limiter, update_rate_limiter_settings
 import webbrowser
 import asyncio
 
@@ -26,7 +28,10 @@ class IFlow2ApiApp:
         self.page = page
         self.settings = load_settings()
 
-        # 设置 pubsub 用于线程安全的 UI 更新
+        # 设置语言
+        set_language(self.settings.language)
+
+        # 设置 pubsub 用于线程安全的 UI 更��
         self.page.pubsub.subscribe(self._on_pubsub_message)
 
         self.server = ServerManager(
@@ -149,7 +154,7 @@ class IFlow2ApiApp:
         """构建 UI"""
         # 状态栏
         self.status_icon = ft.Icon(ft.Icons.CIRCLE, color=ft.Colors.GREY, size=16)
-        self.status_text = ft.Text("服务未运行", size=14)
+        self.status_text = ft.Text(t("server.status_stopped"), size=14)
 
         status_row = ft.Container(
             content=ft.Row([self.status_icon, self.status_text]),
@@ -160,13 +165,13 @@ class IFlow2ApiApp:
 
         # 服务器配置
         self.host_field = ft.TextField(
-            label="监听地址",
+            label=t("server.host"),
             value=self.settings.host,
             hint_text="0.0.0.0",
             expand=True,
         )
         self.port_field = ft.TextField(
-            label="监听端口",
+            label=t("server.port"),
             value=str(self.settings.port),
             hint_text="28000",
             keyboard_type=ft.KeyboardType.NUMBER,
@@ -176,7 +181,7 @@ class IFlow2ApiApp:
         server_config = ft.Container(
             content=ft.Column(
                 [
-                    ft.Text("服务器配置", weight=ft.FontWeight.BOLD),
+                    ft.Text(t("server.config"), weight=ft.FontWeight.BOLD),
                     ft.Row([self.host_field, self.port_field]),
                 ]
             ),
@@ -187,26 +192,26 @@ class IFlow2ApiApp:
 
         # iFlow 配置
         self.api_key_field = ft.TextField(
-            label="API Key",
+            label=t("iflow.api_key"),
             value=self.settings.api_key,
             password=True,
             can_reveal_password=True,
             expand=True,
         )
         self.base_url_field = ft.TextField(
-            label="Base URL",
+            label=t("iflow.base_url"),
             value=self.settings.base_url,
             hint_text="https://apis.iflow.cn/v1",
         )
 
         import_btn = ft.TextButton(
-            "从 iFlow CLI 导入配置",
+            t("iflow.import_from_cli"),
             icon=ft.Icons.DOWNLOAD,
             on_click=self._import_from_cli,
         )
 
         oauth_login_btn = ft.Button(
-            "Login with iFlow",
+            t("iflow.login_with_iflow"),
             icon=ft.Icons.LOGIN,
             on_click=self._login_with_iflow_oauth,
             style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE, color=ft.Colors.WHITE),
@@ -215,7 +220,7 @@ class IFlow2ApiApp:
         iflow_config = ft.Container(
             content=ft.Column(
                 [
-                    ft.Text("iFlow 配置", weight=ft.FontWeight.BOLD),
+                    ft.Text(t("iflow.config"), weight=ft.FontWeight.BOLD),
                     self.api_key_field,
                     self.base_url_field,
                     ft.Row(
@@ -231,7 +236,7 @@ class IFlow2ApiApp:
 
         # 应用设置按钮
         settings_btn = ft.Button(
-            "应用设置",
+            t("settings.app_settings"),
             icon=ft.Icons.SETTINGS,
             on_click=self._show_settings_dialog,
             style=ft.ButtonStyle(
@@ -248,20 +253,20 @@ class IFlow2ApiApp:
 
         # 操作按钮
         self.start_btn = ft.Button(
-            "启动服务",
+            t("button.start"),
             icon=ft.Icons.PLAY_ARROW,
             on_click=self._start_server,
             style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN, color=ft.Colors.WHITE),
         )
         self.stop_btn = ft.Button(
-            "停止服务",
+            t("button.stop"),
             icon=ft.Icons.STOP,
             on_click=self._stop_server,
             disabled=True,
             style=ft.ButtonStyle(bgcolor=ft.Colors.RED, color=ft.Colors.WHITE),
         )
         save_btn = ft.Button(
-            "保存配置",
+            t("button.save"),
             icon=ft.Icons.SAVE,
             on_click=self._save_settings,
         )
@@ -281,7 +286,7 @@ class IFlow2ApiApp:
         log_container = ft.Container(
             content=ft.Column(
                 [
-                    ft.Text("日志", weight=ft.FontWeight.BOLD),
+                    ft.Text(t("log_title"), weight=ft.FontWeight.BOLD),
                     ft.Container(
                         content=self.log_list,
                         height=150,
@@ -309,7 +314,7 @@ class IFlow2ApiApp:
             )
         )
 
-        self._add_log("应用已启动")
+        self._add_log(t("log.app_started"))
 
     def _show_snack_bar(self, message: str, color: str = ft.Colors.GREEN):
         """显示 SnackBar 提示"""
@@ -339,10 +344,32 @@ class IFlow2ApiApp:
 
     def _on_pubsub_message(self, message):
         """处理 pubsub 消息 - 在主线程中执行"""
-        if isinstance(message, dict) and message.get("type") == "server_state":
+        if not isinstance(message, dict):
+            return
+        
+        msg_type = message.get("type")
+        
+        if msg_type == "server_state":
             state = message["state"]
             msg = message["message"]
             self._on_server_state_change(state, msg)
+        
+        elif msg_type == "oauth_success":
+            # OAuth 登录成功，更新 UI
+            api_key = message.get("api_key", "")
+            base_url = message.get("base_url", "")
+            self.api_key_field.value = api_key
+            self.base_url_field.value = base_url
+            self.settings.api_key = api_key
+            self.settings.base_url = base_url
+            self._add_log(t("log.config_updated"))
+            self._show_snack_bar(t("message.login_success"))
+            self.page.update()
+        
+        elif msg_type == "add_log":
+            # 从后台线程添加日志
+            log_msg = message.get("message", "")
+            self._add_log(log_msg)
 
     def _on_server_state_change_threadsafe(self, state: ServerState, message: str):
         """服务状态变化回调 - 线程安全版本，从后台线程调用"""
@@ -357,17 +384,17 @@ class IFlow2ApiApp:
     def _on_server_state_change(self, state: ServerState, message: str):
         """服务状态变化回调 - 必须在主线程调用"""
         state_config = {
-            ServerState.STOPPED: (ft.Colors.GREY, "服务未运行"),
-            ServerState.STARTING: (ft.Colors.ORANGE, "服务启动中..."),
+            ServerState.STOPPED: (ft.Colors.GREY, t("server.status_stopped")),
+            ServerState.STARTING: (ft.Colors.ORANGE, t("server.status_starting")),
             ServerState.RUNNING: (
                 ft.Colors.GREEN,
-                f"服务运行中 (http://{self.settings.host}:{self.settings.port})",
+                t("server.status_running", url=f"http://{self.settings.host}:{self.settings.port}"),
             ),
-            ServerState.STOPPING: (ft.Colors.ORANGE, "服务停止中..."),
-            ServerState.ERROR: (ft.Colors.RED, f"错误: {message}"),
+            ServerState.STOPPING: (ft.Colors.ORANGE, t("server.status_stopping")),
+            ServerState.ERROR: (ft.Colors.RED, t("server.status_error", error=message)),
         }
 
-        color, text = state_config.get(state, (ft.Colors.GREY, "未知状态"))
+        color, text = state_config.get(state, (ft.Colors.GREY, t("server.status_unknown")))
         self.status_icon.color = color
         self.status_text.value = text
 
@@ -395,51 +422,100 @@ class IFlow2ApiApp:
         """启动服务"""
         self._update_settings_from_ui()
         if self.server.start(self.settings):
-            self._add_log("正在启动服务...")
+            self._add_log(t("log.server_starting"))
 
     def _stop_server(self, e):
         """停止服务"""
         if self.server.stop():
-            self._add_log("正在停止服务...")
+            self._add_log(t("log.server_stopping"))
 
     def _save_settings(self, e):
         """保存配置"""
         self._update_settings_from_ui()
         save_settings(self.settings)
-        self._add_log("配置已保存")
+        self._add_log(t("log.settings_saved"))
 
         # 显示提示
-        self._show_snack_bar("配置已保存")
+        self._show_snack_bar(t("message.settings_saved"))
 
     def _show_settings_dialog(self, e):
         """显示应用设置对话框"""
         # 创建对话框中的设置组件
+        # === 启动设置 ===
         auto_start_checkbox = ft.Checkbox(
-            label="开机自启动",
+            label=t("settings.auto_start"),
             value=get_auto_start(),
         )
         start_minimized_checkbox = ft.Checkbox(
-            label="启动时最小化",
+            label=t("settings.start_minimized"),
             value=self.settings.start_minimized,
         )
         minimize_to_tray_checkbox = ft.Checkbox(
-            label="关闭时最小化到托盘",
+            label=t("settings.minimize_to_tray"),
             value=self.settings.minimize_to_tray,
             disabled=not is_tray_available(),
         )
         auto_run_checkbox = ft.Checkbox(
-            label="启动时自动运行服务",
+            label=t("settings.auto_run_server"),
             value=self.settings.auto_run_server,
         )
+        
+        # === 内容处理设置 ===
+        preserve_reasoning_checkbox = ft.Checkbox(
+            label=t("settings.preserve_reasoning_content"),
+            value=self.settings.preserve_reasoning_content,
+            tooltip=t("settings.preserve_reasoning_content_hint"),
+        )
+        
+        # === 外观设置 ===
         theme_dropdown = ft.Dropdown(
-            label="主题模式",
+            label=t("settings.theme_mode"),
             options=[
-                ft.dropdown.Option("system", "跟随系统"),
-                ft.dropdown.Option("light", "亮色主题"),
-                ft.dropdown.Option("dark", "暗色主题"),
+                ft.dropdown.Option("system", t("settings.theme.system")),
+                ft.dropdown.Option("light", t("settings.theme.light")),
+                ft.dropdown.Option("dark", t("settings.theme.dark")),
             ],
             value=self.settings.theme_mode,
             width=200,
+        )
+
+        # 语言下拉框
+        available_languages = get_available_languages()
+        language_dropdown = ft.Dropdown(
+            label=t("settings.language"),
+            options=[
+                ft.dropdown.Option(lang_code, lang_name)
+                for lang_code, lang_name in available_languages.items()
+            ],
+            value=self.settings.language,
+            width=200,
+        )
+        
+        # === 速率限制设置 ===
+        rate_limit_enabled_checkbox = ft.Checkbox(
+            label=t("settings.rate_limit_enabled"),
+            value=self.settings.rate_limit_enabled,
+        )
+        
+        requests_per_minute_field = ft.TextField(
+            label=t("settings.requests_per_minute"),
+            value=str(self.settings.rate_limit_per_minute),
+            keyboard_type=ft.KeyboardType.NUMBER,
+            width=150,
+        )
+        
+        requests_per_hour_field = ft.TextField(
+            label=t("settings.requests_per_hour"),
+            value=str(self.settings.rate_limit_per_hour),
+            keyboard_type=ft.KeyboardType.NUMBER,
+            width=150,
+        )
+        
+        requests_per_day_field = ft.TextField(
+            label=t("settings.requests_per_day"),
+            value=str(self.settings.rate_limit_per_day),
+            keyboard_type=ft.KeyboardType.NUMBER,
+            width=150,
         )
 
         def on_save(e):
@@ -448,13 +524,37 @@ class IFlow2ApiApp:
             if auto_start_checkbox.value != get_auto_start():
                 success = set_auto_start(auto_start_checkbox.value)
                 if not success:
-                    self._add_log("设置开机自启动失败")
+                    self._add_log(t("log.auto_start_failed"))
             
             # 更新其他设置
             self.settings.start_minimized = start_minimized_checkbox.value
             self.settings.minimize_to_tray = minimize_to_tray_checkbox.value
             self.settings.auto_run_server = auto_run_checkbox.value
+            self.settings.preserve_reasoning_content = preserve_reasoning_checkbox.value
             self.settings.theme_mode = theme_dropdown.value or "system"
+            
+            # 更新语言设置
+            new_language = language_dropdown.value or "zh"
+            if new_language != self.settings.language:
+                self.settings.language = new_language
+                set_language(new_language)
+                self._add_log(t("log.language_changed", language=available_languages.get(new_language, new_language)))
+            
+            # 更新速率限制设置
+            try:
+                per_minute = int(requests_per_minute_field.value or "60")
+                per_hour = int(requests_per_hour_field.value or "1000")
+                per_day = int(requests_per_day_field.value or "10000")
+            except ValueError:
+                per_minute, per_hour, per_day = 60, 1000, 10000
+            
+            self.settings.rate_limit_enabled = rate_limit_enabled_checkbox.value
+            self.settings.rate_limit_per_minute = per_minute
+            self.settings.rate_limit_per_hour = per_hour
+            self.settings.rate_limit_per_day = per_day
+            
+            # 更新全局速率限制器
+            update_rate_limiter_settings(per_minute, per_hour, per_day)
             
             # 应用主题
             self._apply_theme()
@@ -462,8 +562,8 @@ class IFlow2ApiApp:
             # 保存设置到文件
             save_settings(self.settings)
             
-            self._add_log("应用设置已保存")
-            self._show_snack_bar("应用设置已保存")
+            self._add_log(t("log.settings_saved"))
+            self._show_snack_bar(t("message.settings_saved"))
             
             # 关闭对话框
             if hasattr(self.page, "close"):
@@ -480,23 +580,59 @@ class IFlow2ApiApp:
                 dlg.open = False
                 self.page.update()
 
+        # 创建可滚动的内容
+        settings_content = ft.Column(
+            [
+                # 启动设置
+                ft.Text(t("settings.section.startup"), weight=ft.FontWeight.BOLD, size=14),
+                auto_start_checkbox,
+                start_minimized_checkbox,
+                minimize_to_tray_checkbox,
+                auto_run_checkbox,
+                
+                ft.Divider(),
+                
+                # 内容处理设置
+                ft.Text(t("settings.section.content"), weight=ft.FontWeight.BOLD, size=14),
+                preserve_reasoning_checkbox,
+                
+                ft.Divider(),
+                
+                # 外观设置
+                ft.Text(t("settings.section.appearance"), weight=ft.FontWeight.BOLD, size=14),
+                ft.Row([theme_dropdown], alignment=ft.MainAxisAlignment.START),
+                ft.Row([language_dropdown], alignment=ft.MainAxisAlignment.START),
+                
+                ft.Divider(),
+                
+                # 速率限制设置
+                ft.Text(t("settings.section.rate_limit"), weight=ft.FontWeight.BOLD, size=14),
+                rate_limit_enabled_checkbox,
+                ft.Row(
+                    [requests_per_minute_field, requests_per_hour_field],
+                    alignment=ft.MainAxisAlignment.START,
+                ),
+                ft.Row(
+                    [requests_per_day_field],
+                    alignment=ft.MainAxisAlignment.START,
+                ),
+            ],
+            spacing=10,
+        )
+
         dlg = ft.AlertDialog(
-            title=ft.Text("应用设置"),
-            content=ft.Column(
-                [
-                    auto_start_checkbox,
-                    start_minimized_checkbox,
-                    minimize_to_tray_checkbox,
-                    auto_run_checkbox,
-                    ft.Divider(),
-                    ft.Row([theme_dropdown], alignment=ft.MainAxisAlignment.START),
-                ],
-                tight=True,
-                spacing=10,
+            title=ft.Text(t("settings.title")),
+            content=ft.Container(
+                content=ft.Column(
+                    [settings_content],
+                    scroll=ft.ScrollMode.AUTO,
+                ),
+                width=400,
+                height=450,
             ),
             actions=[
-                ft.TextButton("取消", on_click=on_cancel),
-                ft.TextButton("保存", on_click=on_save),
+                ft.TextButton(t("button.cancel"), on_click=on_cancel),
+                ft.TextButton(t("button.confirm"), on_click=on_save),
             ],
             actions_alignment=ft.MainAxisAlignment.END,
         )
@@ -526,30 +662,36 @@ class IFlow2ApiApp:
             self.api_key_field.value = config.api_key
             self.base_url_field.value = config.base_url
             self.page.update()
-            self._add_log("已从 iFlow CLI 导入配置")
-            self._show_snack_bar("已从 iFlow CLI 导入配置")
+            self._add_log(t("log.import_success"))
+            self._show_snack_bar(t("message.import_success"))
         else:
-            self._add_log("无法导入 iFlow CLI 配置")
-            self._show_snack_bar("无法导入配置，请确保已运行 iflow 并完成登录", color=ft.Colors.RED)
+            self._add_log(t("log.import_failed"))
+            self._show_snack_bar(t("message.import_failed"), color=ft.Colors.RED)
+
+    def _add_log_threadsafe(self, message: str):
+        """线程安全的添加日志 - 从后台线程调用"""
+        try:
+            self.page.pubsub.send_all({"type": "add_log", "message": message})
+        except Exception:
+            pass
 
     def _login_with_iflow_oauth(self, e):
         """使用 iFlow OAuth 登录"""
         from .oauth_login import OAuthLoginHandler
 
         def on_login_success(config):
-            """OAuth 登录成功后的回调"""
-            # 更新 UI 字段
-            self.api_key_field.value = config.api_key
-            self.base_url_field.value = config.base_url
-            self._add_log("已更新配置到界面")
+            """OAuth 登录成功后的回调 - 在后台线程中执行"""
+            # 通过 pubsub 发送消息到主线程更新 UI
+            try:
+                self.page.pubsub.send_all({
+                    "type": "oauth_success",
+                    "api_key": config.api_key,
+                    "base_url": config.base_url,
+                })
+            except Exception:
+                pass
 
-            # 刷新界面
-            self.page.update()
-
-            # 显示成功提示
-            self._show_snack_bar("登录成功！配置已自动更新")
-
-        handler = OAuthLoginHandler(self._add_log, success_callback=on_login_success)
+        handler = OAuthLoginHandler(self._add_log_threadsafe, success_callback=on_login_success)
         handler.start_login()
 
 

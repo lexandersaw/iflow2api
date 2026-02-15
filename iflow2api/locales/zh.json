@@ -1,0 +1,84 @@
+{
+  "app": {
+    "title": "iflow2api",
+    "description": "iFlow CLI AI 服务代理"
+  },
+  "server": {
+    "config": "服务器配置",
+    "host": "监听地址",
+    "port": "监听端口",
+    "status_stopped": "服务未运行",
+    "status_starting": "服务启动中...",
+    "status_running": "服务运行中 ({url})",
+    "status_stopping": "服务停止中...",
+    "status_error": "错误: {error}",
+    "status_unknown": "未知状态"
+  },
+  "iflow": {
+    "config": "iFlow 配置",
+    "api_key": "API Key",
+    "base_url": "Base URL",
+    "import_from_cli": "从 iFlow CLI 导入配置",
+    "login_with_iflow": "Login with iFlow"
+  },
+  "settings": {
+    "title": "应用设置",
+    "app_settings": "应用设置",
+    "theme_mode": "主题模式",
+    "theme": {
+      "system": "跟随系统",
+      "light": "浅色",
+      "dark": "深色"
+    },
+    "language": "界面语言",
+    "auto_start": "开机自启动",
+    "start_minimized": "启动时最小化",
+    "minimize_to_tray": "关闭时最小化到托盘",
+    "auto_run_server": "启动时自动运行服务",
+    "preserve_reasoning_content": "保留思考链内容",
+    "preserve_reasoning_content_hint": "启用后，响应中将保留 reasoning_content 字段，客户端可分别显示思考过程和最终回答",
+    "section": {
+      "startup": "启动设置",
+      "content": "内容处理",
+      "appearance": "外观设置",
+      "rate_limit": "速率限制"
+    },
+    "rate_limit_enabled": "启用速率限制",
+    "requests_per_minute": "每分钟请求数",
+    "requests_per_hour": "每小时请求数",
+    "requests_per_day": "每日请求数"
+  },
+  "button": {
+    "start": "启动服务",
+    "stop": "停止服务",
+    "save": "保存配置",
+    "cancel": "取消",
+    "confirm": "确认",
+    "login": "OAuth 登录",
+    "apply_settings": "应用设置"
+  },
+  "log": {
+    "app_started": "应用已启动",
+    "settings_saved": "配置已保存",
+    "server_started": "服务已启动",
+    "server_stopped": "服务已停止",
+    "server_starting": "正在启动服务...",
+    "server_stopping": "正在停止服务...",
+    "auto_start_failed": "设置开机自启动失败",
+    "language_changed": "语言已切换为: {language}",
+    "import_success": "已从 iFlow CLI 导入配置",
+    "import_failed": "无法导入 iFlow CLI 配置",
+    "import_failed_hint": "无法导入配置，请确保已运行 iflow 并完成登录",
+    "config_updated": "已更新配置到界面",
+    "login_success": "登录成功！配置已自动更新"
+  },
+  "message": {
+    "settings_saved": "设置已保存",
+    "server_running": "服务运行中",
+    "server_stopped": "服务已停止",
+    "import_success": "已从 iFlow CLI 导入配置",
+    "import_failed": "无法导入配置，请确保已运行 iflow 并完成登录",
+    "login_success": "登录成功！配置已自动更新"
+  },
+  "log_title": "日志"
+}
