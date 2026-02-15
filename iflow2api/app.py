@@ -46,11 +46,23 @@ def openai_to_anthropic_response(openai_response: dict, model: str) -> dict:
     content_text = ""
     finish_reason = "end_turn"
     
-    if choices:
+    # 验证响应结构
+    if not choices:
+        print(f"[iflow2api] 警告: OpenAI 响应中 choices 数组为空")
+        print(f"[iflow2api] 完整响应: {json.dumps(openai_response, ensure_ascii=False)[:500]}")
+        # 使用回退内容避免空响应
+        content_text = "[错误: API 未返回有效内容]"
+    else:
         choice = choices[0]
         message = choice.get("message", {})
         # 优先使用 content，如果没有则使用 reasoning_content
         content_text = message.get("content") or message.get("reasoning_content", "")
+        
+        # 如果 content 是 None 或空字符串，记录警告
+        if not content_text:
+            print(f"[iflow2api] 警告: message.content 为空或 None")
+            print(f"[iflow2api] message 内容: {json.dumps(message, ensure_ascii=False)}")
+            content_text = "[错误: API 返回空内容]"
         
         # 转换 finish_reason
         openai_finish = choice.get("finish_reason", "stop")
@@ -488,6 +500,10 @@ async def chat_completions_openai(request: Request):
         body_bytes = await request.body()
         body = json.loads(body_bytes.decode("utf-8"))
         stream = body.get("stream", False)
+        model = body.get("model", "unknown")
+        msg_count = len(body.get("messages", []))
+        has_tools = "tools" in body
+        print(f"[iflow2api] Chat请求: model={model}, stream={stream}, messages={msg_count}, has_tools={has_tools}")
 
         if stream:
             # 获取流式迭代器
@@ -496,12 +512,35 @@ async def chat_completions_openai(request: Request):
                 stream_gen = await proxy.chat_completions(body, stream=True)
                 
                 async def generate():
+                    chunk_count = 0
                     try:
                         async for chunk in stream_gen:
+                            chunk_count += 1
+                            if chunk_count <= 3:
+                                print(f"[iflow2api] 流式chunk[{chunk_count}]: {chunk[:200]}")
                             yield chunk
                     except Exception as e:
                         # 传输过程中的错误
-                        print(f"[iflow2api] Streaming error: {e}")
+                        print(f"[iflow2api] Streaming error after {chunk_count} chunks: {e}")
+                    finally:
+                        print(f"[iflow2api] 流式完成: 共 {chunk_count} chunks")
+                        if chunk_count == 0:
+                            # 上游返回了空的流式响应，生成一个错误回退
+                            print(f"[iflow2api] 生成错误回退响应 (0 chunks from upstream)")
+                            import time as _time
+                            fallback = {
+                                "id": f"fallback-{int(_time.time())}",
+                                "object": "chat.completion.chunk",
+                                "created": int(_time.time()),
+                                "model": model,
+                                "choices": [{
+                                    "index": 0,
+                                    "delta": {"role": "assistant", "content": "[Error] 上游 API 返回了空响应，可能是对话过长或服务暂时不可用，请缩短对话后重试。"},
+                                    "finish_reason": "stop"
+                                }]
+                            }
+                            yield ("data: " + json.dumps(fallback, ensure_ascii=False) + "\n\n").encode("utf-8")
+                            yield b"data: [DONE]\n\n"
                 
                 return StreamingResponse(
                     generate(),
@@ -523,6 +562,20 @@ async def chat_completions_openai(request: Request):
                 return create_error_response(500, error_msg)
         else:
             result = await proxy.chat_completions(body, stream=False)
+            # 验证响应包含有效的 choices
+            if not result.get("choices"):
+                print(f"[iflow2api] 错误: API 响应缺少 choices 数组")
+                print(f"[iflow2api] 完整响应: {json.dumps(result, ensure_ascii=False)[:500]}")
+                return create_error_response(500, "API 响应格式错误: 缺少 choices 数组")
+            
+            # 日志输出关键信息
+            msg = result["choices"][0].get("message", {})
+            content = msg.get("content")
+            reasoning = msg.get("reasoning_content")
+            tool_calls = msg.get("tool_calls")
+            print(f"[iflow2api] 非流式响应: content={repr(content[:80]) if content else None}, "
+                  f"reasoning={'有' if reasoning else '无'}, tool_calls={'有' if tool_calls else '无'}")
+            
             return JSONResponse(content=result)
 
     except json.JSONDecodeError as e:
@@ -621,8 +674,9 @@ async def messages_anthropic(request: Request):
         else:
             # 非流式响应 - 转换为 Anthropic 格式
             openai_result = await proxy.chat_completions(openai_body, stream=False)
+            print(f"[iflow2api] 收到 OpenAI 格式响应: {json.dumps(openai_result, ensure_ascii=False)[:300]}")
             anthropic_result = openai_to_anthropic_response(openai_result, mapped_model)
-            print(f"[iflow2api] Anthropic 格式响应: id={anthropic_result['id']}")
+            print(f"[iflow2api] Anthropic 格式响应: id={anthropic_result['id']}, content_length={len(anthropic_result['content'][0]['text'])}")
             return JSONResponse(content=anthropic_result)
 
     except json.JSONDecodeError as e:
@@ -673,6 +727,11 @@ async def root_post(request: Request):
             )
         else:
             result = await proxy.chat_completions(body, stream=False)
+            # 验证响应包含有效的 choices
+            if not result.get("choices"):
+                print(f"[iflow2api] 错误: API 响应缺少 choices 数组 (root_post)")
+                print(f"[iflow2api] 完整响应: {json.dumps(result, ensure_ascii=False)[:500]}")
+                raise HTTPException(status_code=500, detail="API 响应格式错误: 缺少 choices 数组")
             return JSONResponse(content=result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
