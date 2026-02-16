@@ -187,11 +187,72 @@ async def delete_user(
 
 # ==================== 系统状态 ====================
 
+def _check_service_health(port: int, host: str = "127.0.0.1") -> tuple[bool, str]:
+    """
+    检查服务健康状态
+    
+    Returns:
+        (is_healthy, error_message)
+    """
+    import socket
+    import http.client
+    
+    # 首先检查端口是否在监听
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1)
+            result = s.connect_ex((host, port))
+            if result != 0:
+                return False, f"端口 {port} 未监听"
+    except Exception as e:
+        return False, f"端口检查失败: {str(e)}"
+    
+    # 然后检查 HTTP 健康端点
+    try:
+        conn = http.client.HTTPConnection(host, port, timeout=2)
+        conn.request("GET", "/health")
+        response = conn.getresponse()
+        if response.status == 200:
+            import json
+            data = json.loads(response.read().decode())
+            conn.close()
+            if data.get("status") == "healthy":
+                return True, ""
+            else:
+                return True, f"健康检查返回: {data.get('status')}"
+        else:
+            conn.close()
+            return False, f"健康检查失败: HTTP {response.status}"
+    except Exception as e:
+        # 端口开放但健康检查失败，服务可能正在启动中
+        return True, f"健康检查异常: {str(e)}"
+
+
 @admin_router.get("/status")
 async def get_status(username: str = Depends(get_current_user)) -> dict[str, Any]:
     """获取系统状态"""
-    # 获取服务器状态
+    from ..settings import load_settings
+    
+    # 获取服务器管理器状态
     server_manager = _get_server_manager()
+    manager_state = server_manager.state.value if server_manager else "stopped"
+    manager_error = server_manager.error_message if server_manager else ""
+    
+    # 获取配置的端口
+    settings = load_settings()
+    configured_port = settings.port
+    
+    # 实际检查服务健康状态
+    is_healthy, health_error = _check_service_health(configured_port)
+    
+    # 确定最终状态
+    # 如果服务健康，则显示运行中，否则使用管理器状态
+    if is_healthy:
+        actual_state = "running"
+        actual_error = ""
+    else:
+        actual_state = manager_state if manager_state != "running" else "stopped"
+        actual_error = health_error or manager_error
     
     # 获取系统信息
     system_info = {
@@ -212,8 +273,10 @@ async def get_status(username: str = Depends(get_current_user)) -> dict[str, Any
     
     return {
         "server": {
-            "state": server_manager.state.value if server_manager else "stopped",
-            "error_message": server_manager.error_message if server_manager else "",
+            "state": actual_state,
+            "error_message": actual_error,
+            "manager_state": manager_state,  # 保留管理器状态供调试
+            "configured_port": configured_port,
         },
         "system": system_info,
         "process": process_info,
