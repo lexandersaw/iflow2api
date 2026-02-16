@@ -3,17 +3,24 @@
 跨平台系统托盘支持：
 - Windows: 使用 pystray
 - macOS: 使用 pystray (菜单栏图标)
-- Linux: 使用 pystray (需要 AppIndicator 支持)
+- Linux: 使用 pystray (需要 AppIndicator ���持)
 """
+
+from __future__ import annotations
 
 import threading
 from typing import Callable, Optional
-from PIL import Image, ImageDraw
+
+try:
+    from PIL import Image, ImageDraw
+    PIL_AVAILABLE = True
+except (ImportError, OSError):
+    PIL_AVAILABLE = False
 
 try:
     import pystray
     from pystray import MenuItem, Menu
-    PYSTRAY_AVAILABLE = True
+    PYSTRAY_AVAILABLE = PIL_AVAILABLE and True
 except ImportError:
     PYSTRAY_AVAILABLE = False
 
