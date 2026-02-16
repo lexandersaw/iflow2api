@@ -70,6 +70,7 @@ jobs:
   # Docker 构建和发布
   docker:
     runs-on: ubuntu-latest
+    environment: DOCKERHUB
     permissions:
       contents: read
       packages: write
