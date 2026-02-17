@@ -188,13 +188,34 @@ def parse_openai_sse_chunk(line: str) -> Optional[dict]:
     return None
 
 
-def extract_content_from_delta(delta: dict) -> str:
-    """从 OpenAI delta 中提取内容（支持 content 和 reasoning_content）"""
-    # 优先使用 content，然后尝试 reasoning_content
+def extract_content_from_delta(delta: dict, preserve_reasoning: bool = False) -> str:
+    """从 OpenAI delta 中提取内容
+    
+    Args:
+        delta: OpenAI 流式响应的 delta 对象
+        preserve_reasoning: 是否保留思考链模式
+            - False（默认）: 将 reasoning_content 也作为内容输出（兼容模式）
+            - True: 只输出 content，跳过 reasoning_content（思考链模式）
+    
+    上游API行为（GLM-5）：
+    - 流式响应：思考过程和回答分开返回
+      - 大部分chunk只有 reasoning_content（思考过程）
+      - 少部分chunk只有 content（最终回答）
+      - 两者不会同时出现在同一个chunk中
+    """
     content = delta.get("content", "")
-    if not content:
-        content = delta.get("reasoning_content", "")
-    return content or ""
+    reasoning_content = delta.get("reasoning_content", "")
+    
+    if content:
+        # 有 content，直接返回（这是最终回答）
+        return content
+    elif reasoning_content and not preserve_reasoning:
+        # 只有 reasoning_content，且不保留思考链模式，返回思考内容（兼容模式）
+        return reasoning_content
+    else:
+        # 只有 reasoning_content，但 preserve_reasoning=True，跳过这个 chunk
+        # 或者两者都为空
+        return ""
 
 
 # ============ Anthropic → OpenAI 请求转换 ============
@@ -1068,6 +1089,11 @@ async def messages_anthropic(request: Request):
 
         if stream:
             # 流式响应 - 转换为 Anthropic SSE 格式
+            # 加载配置以获取思考链设置
+            from .settings import load_settings
+            settings = load_settings()
+            preserve_reasoning = settings.preserve_reasoning_content
+            
             async def generate_anthropic_stream():
                 # 发送 message_start
                 yield create_anthropic_stream_message_start(mapped_model).encode('utf-8')
@@ -1090,7 +1116,7 @@ async def messages_anthropic(request: Request):
                             choices = parsed.get("choices", [])
                             if choices:
                                 delta = choices[0].get("delta", {})
-                                content = extract_content_from_delta(delta)
+                                content = extract_content_from_delta(delta, preserve_reasoning)
                                 if content:
                                     output_tokens += len(content) // 4  # 粗略估计 token
                                     yield create_anthropic_content_block_delta(content).encode('utf-8')
@@ -1103,7 +1129,7 @@ async def messages_anthropic(request: Request):
                             choices = parsed.get("choices", [])
                             if choices:
                                 delta = choices[0].get("delta", {})
-                                content = extract_content_from_delta(delta)
+                                content = extract_content_from_delta(delta, preserve_reasoning)
                                 if content:
                                     output_tokens += len(content) // 4
                                     yield create_anthropic_content_block_delta(content).encode('utf-8')
