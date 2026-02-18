@@ -142,13 +142,23 @@ python -c "import uvicorn; from iflow2api.app import app; uvicorn.run(app, host=
 
 ## Docker Deployment
 
-```bash
-# Using docker-compose
-docker-compose up -d
+Images are published to Docker Hub with rolling release support:
 
-# Or build and run directly
-docker build -t iflow2api .
-docker run -d -p 28000:28000 -v ~/.iflow:/home/appuser/.iflow:ro iflow2api
+```bash
+# Use latest stable version (recommended)
+docker pull cacaview/iflow2api:latest
+
+# Use development version (experience latest features)
+docker pull cacaview/iflow2api:edge
+
+# Use specific version
+docker pull cacaview/iflow2api:1.1.5
+```
+
+Or using docker-compose:
+
+```bash
+docker-compose up -d
 ```
 
 For detailed deployment instructions, see [Docker Deployment Guide](docs/DOCKER.md).

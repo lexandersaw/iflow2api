@@ -115,11 +115,28 @@ docker pull --platform linux/amd64 iflow2api:latest
 
 ## Docker Hub
 
-镜像已发布到 Docker Hub：
+镜像已发布到 Docker Hub，支持滚动发布策略：
+
+### 可用标签
+
+| 标签 | 说明 | 更新策略 |
+|------|------|----------|
+| `latest` | 最新稳定版 | 发布新版本时更新 |
+| `edge` | 开发版 | main 分支每次推送时更新 |
+| `1.1.5` | 特定版本 | 永久保留 |
+| `1.1` | 1.1.x 系列最新版 | 该系列发布新版本时更�� |
+
+### 使用示例
 
 ```bash
-# 拉取镜像
+# 拉取最新稳定版（推荐）
 docker pull cacaview/iflow2api:latest
+
+# 拉取开发版（体验最新功能）
+docker pull cacaview/iflow2api:edge
+
+# 拉取特定版本
+docker pull cacaview/iflow2api:1.1.5
 
 # 使用 Docker Hub 镜像运行
 docker run -d \
@@ -128,6 +145,8 @@ docker run -d \
   -v ~/.iflow:/home/appuser/.iflow:ro \
   cacaview/iflow2api:latest
 ```
+
+> **注意**：`edge` 标签跟随 main 分支开发进度，可能包含未发布的功能，不建议在生产环境使用。
 
 ## 生产环境建议
 
