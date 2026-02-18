@@ -60,7 +60,7 @@ class AppSettings(BaseModel):
 
     # 自定义 API 鉴权设置
     custom_api_key: str = ""  # 自定义 API 密钥，留空则不验证
-    custom_auth_header: str = "Authorization"  # 自定义授权标头名称
+    custom_auth_header: str = ""  # 自定义授权标头名称，留空则使用默认的 Authorization
 
 
 def get_config_dir() -> Path:

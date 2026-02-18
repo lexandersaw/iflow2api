@@ -725,7 +725,7 @@ class IFlow2ApiApp:
             
             # 更新自定义 API 鉴权设置
             self.settings.custom_api_key = custom_api_key_field.value or ""
-            self.settings.custom_auth_header = custom_auth_header_field.value or "Authorization"
+            self.settings.custom_auth_header = custom_auth_header_field.value or ""
             
             # 应用主题
             self._apply_theme()
