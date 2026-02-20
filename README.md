@@ -4,6 +4,8 @@
 
 将 iFlow CLI 的 AI 服务暴露为 OpenAI 兼容 API。
 
+##### **我们在[这里](https://github.com/cacaview/iflow2api-sdk)发布了我们的SDK！欢迎来进行使用！**
+
 ## 功能
 
 ### 核心功能
@@ -42,23 +44,23 @@
 
 | 模型 ID                | 名称              | 说明                      |
 | ---------------------- | ----------------- | ------------------------- |
-| `glm-4.6`             | GLM-4.6           | 智谱 GLM-4.6              |
-| `glm-4.7`             | GLM-4.7           | 智谱 GLM-4.7              |
-| `glm-5`               | GLM-5             | 智谱 GLM-5 (推荐)         |
-| `iFlow-ROME-30BA3B`   | iFlow-ROME-30BA3B | iFlow ROME 30B (快速)     |
-| `deepseek-v3.2-chat`  | DeepSeek-V3.2     | DeepSeek V3.2 对话模型    |
-| `qwen3-coder-plus`    | Qwen3-Coder-Plus  | 通义千问 Qwen3 Coder Plus |
-| `kimi-k2`             | Kimi-K2           | Moonshot Kimi K2          |
-| `kimi-k2-thinking`    | Kimi-K2-Thinking  | Moonshot Kimi K2 思考模型 |
-| `kimi-k2.5`           | Kimi-K2.5         | Moonshot Kimi K2.5        |
-| `kimi-k2-0905`        | Kimi-K2-0905      | Moonshot Kimi K2 0905     |
-| `minimax-m2.5`        | MiniMax-M2.5      | MiniMax M2.5              |
+| `glm-4.6`            | GLM-4.6           | 智谱 GLM-4.6              |
+| `glm-4.7`            | GLM-4.7           | 智谱 GLM-4.7              |
+| `glm-5`              | GLM-5             | 智谱 GLM-5 (推荐)         |
+| `iFlow-ROME-30BA3B`  | iFlow-ROME-30BA3B | iFlow ROME 30B (快速)     |
+| `deepseek-v3.2-chat` | DeepSeek-V3.2     | DeepSeek V3.2 对话模型    |
+| `qwen3-coder-plus`   | Qwen3-Coder-Plus  | 通义千问 Qwen3 Coder Plus |
+| `kimi-k2`            | Kimi-K2           | Moonshot Kimi K2          |
+| `kimi-k2-thinking`   | Kimi-K2-Thinking  | Moonshot Kimi K2 思考模型 |
+| `kimi-k2.5`          | Kimi-K2.5         | Moonshot Kimi K2.5        |
+| `kimi-k2-0905`       | Kimi-K2-0905      | Moonshot Kimi K2 0905     |
+| `minimax-m2.5`       | MiniMax-M2.5      | MiniMax M2.5              |
 
 ### 视觉模型
 
-| 模型 ID                | 名称              | 说明                      |
-| ---------------------- | ----------------- | ------------------------- |
-| `qwen-vl-max`         | Qwen-VL-Max       | 通义千问 VL Max 视觉模型  |
+| 模型 ID         | 名称        | 说明                     |
+| --------------- | ----------- | ------------------------ |
+| `qwen-vl-max` | Qwen-VL-Max | 通义千问 VL Max 视觉模型 |
 
 > 模型列表来源于 iflow-cli 源码，可能随 iFlow 更新而变化。
 
@@ -137,8 +139,8 @@ python -c "import uvicorn; from iflow2api.app import app; uvicorn.run(app, host=
 | `/models`              | GET  | 兼容端点 (不带 /v1 前缀)                        |
 | `/chat/completions`    | POST | 兼容端点 (不带 /v1 前缀)                        |
 | `/docs`                | GET  | Swagger UI API 文档                             |
-| `/redoc`                | GET  | ReDoc API 文档                                  |
-| `/admin`                | GET  | Web 管理界面                                    |
+| `/redoc`               | GET  | ReDoc API 文档                                  |
+| `/admin`               | GET  | Web 管理界面                                    |
 
 ## Docker 部署
 
@@ -171,6 +173,7 @@ iflow2api 提供了独立的 Web 管理界面，支持远程管理：
 - 默认用户名/密码：`admin` / `admin`
 
 **功能特性**：
+
 - 实时服务状态监控
 - 多实例管理
 - 远程启动/停止服务
@@ -194,14 +197,15 @@ iflow2api 提供了独立的 Web 管理界面，支持远程管理：
 
 **配置说明**
 
-| 配置值 | 行为 | 适用场景 |
-| ------ | ---- | -------- |
-| `false`（默认） | 将 `reasoning_content` 合并到 `content` 字段 | OpenAI 兼容客户端，只需最终回答 |
-| `true` | 保留 `reasoning_content` 字段，同时复制到 `content` | 需要分别显示思考过程和回答的客户端 |
+| 配置值            | 行为                                                    | 适用场景                           |
+| ----------------- | ------------------------------------------------------- | ---------------------------------- |
+| `false`（默认） | 将 `reasoning_content` 合并到 `content` 字段        | OpenAI 兼容客户端，只需最终回答    |
+| `true`          | 保留 `reasoning_content` 字段，同时复制到 `content` | 需要分别显示思考过程和回答的客户端 |
 
 **响应格式对比**
 
 默认模式（`preserve_reasoning_content: false`）：
+
 ```json
 {
   "choices": [{
@@ -213,6 +217,7 @@ iflow2api 提供了独立的 Web 管理界面，支持远程管理：
 ```
 
 保留模式（`preserve_reasoning_content: true`）：
+
 ```json
 {
   "choices": [{

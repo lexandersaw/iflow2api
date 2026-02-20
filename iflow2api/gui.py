@@ -616,6 +616,15 @@ class IFlow2ApiApp:
             tooltip=t("settings.preserve_reasoning_content_hint"),
         )
         
+        # === 上游 API 并发设置 ===
+        api_concurrency_field = ft.TextField(
+            label=t("settings.api_concurrency"),
+            value=str(self.settings.api_concurrency),
+            keyboard_type=ft.KeyboardType.NUMBER,
+            width=100,
+            tooltip=t("settings.api_concurrency_hint"),
+        )
+        
         # === 外观设置 ===
         theme_dropdown = ft.Dropdown(
             label=t("settings.theme_mode"),
@@ -710,6 +719,17 @@ class IFlow2ApiApp:
                 set_language(new_language)
                 self._add_log(t("log.language_changed", language=available_languages.get(new_language, new_language)))
             
+            # 更新上游 API 并发设置
+            try:
+                api_concurrency = int(api_concurrency_field.value or "1")
+                if api_concurrency < 1:
+                    api_concurrency = 1
+                elif api_concurrency > 10:
+                    api_concurrency = 10
+            except ValueError:
+                api_concurrency = 1
+            self.settings.api_concurrency = api_concurrency
+            
             # 更新速率限制设置
             try:
                 per_minute = int(requests_per_minute_field.value or "60")
@@ -775,6 +795,16 @@ class IFlow2ApiApp:
                 # 内容处理设置
                 ft.Text(t("settings.section.content"), weight=ft.FontWeight.BOLD, size=14),
                 preserve_reasoning_checkbox,
+                
+                ft.Divider(),
+                
+                # 上游 API 并发设置
+                ft.Text(t("settings.section.api"), weight=ft.FontWeight.BOLD, size=14),
+                ft.Row(
+                    [api_concurrency_field],
+                    alignment=ft.MainAxisAlignment.START,
+                ),
+                ft.Text(t("settings.api_concurrency_warning"), size=11, color=ft.Colors.OUTLINE),
                 
                 ft.Divider(),
                 

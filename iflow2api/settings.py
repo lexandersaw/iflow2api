@@ -51,6 +51,11 @@ class AppSettings(BaseModel):
     # 思考链设置
     preserve_reasoning_content: bool = True
 
+    # 上游 API 并发设置
+    # 注意：过高的并发数可能导致上游 API 返回 429 限流错误
+    # 默认值为 1，表示串行处理；建议范围 1-5
+    api_concurrency: int = Field(default=1, ge=1, le=10)
+
     # 语言设置
     language: str = "zh"
 
@@ -157,6 +162,9 @@ def load_settings() -> AppSettings:
                 # 思考链设置
                 if "preserve_reasoning_content" in data:
                     settings.preserve_reasoning_content = data["preserve_reasoning_content"]
+                # 上游 API 并发设置
+                if "api_concurrency" in data:
+                    settings.api_concurrency = data["api_concurrency"]
                 # OAuth 设置
                 if "auth_type" in data:
                     settings.auth_type = data["auth_type"]
@@ -238,6 +246,8 @@ def save_settings(settings: AppSettings) -> None:
         "rate_limit_per_day": settings.rate_limit_per_day,
         # 思考链设置
         "preserve_reasoning_content": settings.preserve_reasoning_content,
+        # 上游 API 并发设置
+        "api_concurrency": settings.api_concurrency,
         # 语言设置
         "language": settings.language,
         # 更新检查设置

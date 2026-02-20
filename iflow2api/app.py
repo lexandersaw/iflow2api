@@ -519,8 +519,8 @@ _config: Optional[IFlowConfig] = None
 _refresher: Optional[OAuthTokenRefresher] = None
 _rate_limiter: Optional[RateLimiter] = None
 
-# 上游 API 并发信号量 - 最多同时 10 个上游请求（M-02 修复：从全局串行锁升级为并发信号量）
-_api_request_lock = asyncio.Semaphore(10)
+# 上游 API 并发信号量 - 在 lifespan 中根据配置初始化
+_api_request_lock: Optional[asyncio.Semaphore] = None
 
 
 def get_proxy() -> IFlowProxy:
@@ -560,7 +560,7 @@ def update_proxy_token(token_data: dict):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    global _refresher, _proxy, _rate_limiter
+    global _refresher, _proxy, _rate_limiter, _api_request_lock
     # 启动时打印版本和系统信息
     logger.info("%s", get_startup_info())
     
@@ -579,9 +579,16 @@ async def lifespan(app: FastAPI):
         _refresher.start()
         logger.info("已启动 Token 自动刷新任务")
         
-        # 初始化速率限制器
+        # 初始化速率限制器和并发信号量
         from .settings import load_settings
         settings = load_settings()
+        
+        # 初始化上游 API 并发信号量
+        _api_request_lock = asyncio.Semaphore(settings.api_concurrency)
+        logger.info("上游 API 并发数: %d", settings.api_concurrency)
+        if settings.api_concurrency > 1:
+            logger.warning("警告: 并发数 > 1 可能导致上游 API 返回 429 限流错误，建议保持默认值 1")
+        
         rate_limit_config = RateLimitConfig(
             enabled=settings.rate_limit_enabled,
             requests_per_minute=settings.rate_limit_per_minute,

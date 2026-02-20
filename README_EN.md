@@ -4,6 +4,8 @@ English Documentation | [简体中文](README.md)
 
 Exposes iFlow CLI's AI services as an OpenAI-compatible API.
 
+##### **We released our SDK [here](https://github.com/cacaview/iflow2api-sdk)! Welcome to use it!**
+
 ## Features
 
 ### Core Features
