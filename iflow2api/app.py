@@ -581,6 +581,12 @@ async def lifespan(app: FastAPI):
         logger.warning("警告: 并发数 > 1 可能导致上游 API 返回 429 限流错误，建议保持默认值 1")
     
     # 尝试加载 iFlow 配置（可选）
+    # 优先检查应用主配置 ~/.iflow2api/config.json（用户通过 WebUI 登录后保存）
+    # 其次检查 iFlow CLI 配置 ~/.iflow/settings.json
+    from pathlib import Path
+    app_config_path = Path.home() / ".iflow2api" / "config.json"
+    app_config_exists = app_config_path.exists()
+    
     try:
         config = load_iflow_config()
         _config = config
@@ -597,8 +603,13 @@ async def lifespan(app: FastAPI):
         logger.info("已启动 Token 自动刷新任务")
         
     except FileNotFoundError:
-        logger.warning("iFlow 配置文件不存在，请通过 WebUI 完成登录")
-        logger.warning("访问 http://localhost:%d/admin 进入管理界面", settings.port)
+        # 检查是否存在应用主配置（用户通过 WebUI 登录）
+        if app_config_exists:
+            logger.info("检测到应用配置文件，等待 WebUI 初始化...")
+            logger.info("访问 http://localhost:%d/admin 进入管理界面", settings.port)
+        else:
+            logger.warning("iFlow 配置文件不存在，请通过 WebUI 完成登录")
+            logger.warning("访问 http://localhost:%d/admin 进入管理界面", settings.port)
     except ValueError as e:
         logger.warning("iFlow 配置文件格式错误: %s", e)
         logger.warning("请通过 WebUI 重新登录")

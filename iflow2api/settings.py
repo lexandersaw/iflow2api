@@ -242,7 +242,7 @@ def save_settings(settings: AppSettings) -> None:
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(app_data, f, indent=2, ensure_ascii=False)
 
-    # 2. 同时保存到 ~/.iflow/settings.json 以保持兼容性
+    # 2. 同时保存到 ~/.iflow/settings.json 以保持兼容性（Docker 中可能只读，忽略错误）
     try:
         existing_config = load_iflow_config()
     except (FileNotFoundError, ValueError):
@@ -255,7 +255,11 @@ def save_settings(settings: AppSettings) -> None:
     ):
         existing_config.api_key = settings.api_key
         existing_config.base_url = settings.base_url
-        save_iflow_config(existing_config)
+        try:
+            save_iflow_config(existing_config)
+        except (PermissionError, OSError) as e:
+            # Docker 中 ~/.iflow 可能只读挂载，忽略写入错误
+            logger.debug("无法写入 ~/.iflow/settings.json（可能是只读挂载）: %s", e)
 
 
 def set_auto_start(enabled: bool) -> bool:

@@ -125,7 +125,26 @@ def load_iflow_config() -> IFlowConfig:
 
 
 def check_iflow_login() -> bool:
-    """检查 iFlow 是否已登录"""
+    """检查 iFlow 是否已登录
+    
+    检查顺序：
+    1. 先检查 ~/.iflow2api/config.json（应用主配置）
+    2. 再检查 ~/.iflow/settings.json（iFlow CLI 配置）
+    """
+    # 首先检查应用主配置
+    from pathlib import Path
+    app_config_path = Path.home() / ".iflow2api" / "config.json"
+    if app_config_path.exists():
+        try:
+            import json
+            with open(app_config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("api_key"):
+                return True
+        except Exception:
+            pass
+    
+    # 再检查 iFlow CLI 配置
     try:
         config = load_iflow_config()
         return bool(config.api_key)
