@@ -214,10 +214,11 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install build tools
+      - name: Install build tools and dependencies
         run: |
           python -m pip install --upgrade pip
           pip install build twine
+          pip install flet pystray Pillow
 
       - name: Build package
         run: python -m build
