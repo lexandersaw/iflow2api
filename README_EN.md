@@ -144,7 +144,26 @@ The service runs by default on `http://localhost:28000`
 ### Custom Port
 
 ```bash
-python -c "import uvicorn; from iflow2api.app import app; uvicorn.run(app, host='0.0.0.0', port=8001)"
+# Using command line arguments
+iflow2api --port 28001
+
+# Specify listen address
+iflow2api --host 0.0.0.0 --port 28001
+
+# Show help
+iflow2api --help
+
+# Show version
+iflow2api --version
+```
+
+Or edit the configuration file `~/.iflow2api/config.json`:
+
+```json
+{
+  "host": "0.0.0.0",
+  "port": 28001
+}
 ```
 
 ## API Endpoints

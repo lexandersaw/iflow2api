@@ -37,7 +37,8 @@ class ConfigEncryption:
         self._key_path = Path.home() / ".iflow2api" / ".key"
 
         if not HAS_CRYPTOGRAPHY:
-            logger.warning("cryptography 库未安装，配置加密功能不可用；运行 'pip install cryptography' 启用加密")
+            logger.warning("cryptography 库未安装，配置加密功能不可用")
+            logger.warning("运行 'pip install iflow2api[full]' 或 'pip install cryptography' 启用加密")
             return
 
         if key:

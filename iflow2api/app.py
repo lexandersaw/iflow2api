@@ -1647,8 +1647,38 @@ async def count_tokens(request: Request):
 
 def main():
     """主入口"""
+    import argparse
     import uvicorn
     from .settings import load_settings
+
+    # 解析命令行参数
+    parser = argparse.ArgumentParser(
+        prog='iflow2api',
+        description='iFlow CLI AI 服务代理 - OpenAI 兼容 API',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+示例:
+  iflow2api                    # 使用默认配置启动
+  iflow2api --port 28001       # 指定端口
+  iflow2api --host 0.0.0.0     # 监听所有网卡
+  iflow2api --version          # 显示版本信息
+
+配置文件位置:
+  ~/.iflow2api/config.json     # 应用配置
+  ~/.iflow/settings.json       # iFlow CLI 配置
+
+更多信息请访问: https://github.com/cacaview/iflow2api
+        '''
+    )
+    parser.add_argument('--host', default=None, help='监听地址 (默认: 0.0.0.0)')
+    parser.add_argument('--port', type=int, default=None, help='监听端口 (默认: 28000)')
+    parser.add_argument('--version', action='store_true', help='显示版本信息')
+    args = parser.parse_args()
+
+    # --version 处理
+    if args.version:
+        print(f"iflow2api {get_version()}")
+        sys.exit(0)
 
     # 检查是否已登录
     if not check_iflow_login():
@@ -1658,17 +1688,49 @@ def main():
     # 加载配置
     settings = load_settings()
 
+    # 命令行参数优先于配置文件
+    host = args.host if args.host else settings.host
+    port = args.port if args.port else settings.port
+
     # 打印启动信息
     logger.info("%s", get_startup_info())
-    logger.info("  监听地址: %s:%d", settings.host, settings.port)
+    logger.info("  监听地址: %s:%d", host, port)
+
+    # 显示快速入门引导
+    _show_quick_start_guide(port)
 
     # 启动服务 - 直接传入 app 对象而非字符串，避免打包后导入失败
-    uvicorn.run(
-        app,
-        host=settings.host,
-        port=settings.port,
-        reload=False,
-    )
+    try:
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+            reload=False,
+        )
+    except OSError as e:
+        # 端口冲突友好提示
+        if "Address already in use" in str(e) or getattr(e, 'errno', None) in (48, 98, 10048):
+            logger.error("端口 %d 已被占用", port)
+            logger.error("请使用 --port 指定其他端口，例如: iflow2api --port %d", port + 1)
+            logger.error("或修改配置文件 ~/.iflow2api/config.json 中的 port 字段")
+        raise
+
+
+def _show_quick_start_guide(port: int):
+    """显示快速入门引导"""
+    logger.info("")
+    logger.info("╔══════════════════════════════════════════════════════════╗")
+    logger.info("║                    快速入门指南                           ║")
+    logger.info("╠══════════════════════════════════════════════════════════╣")
+    logger.info("║  API 端点: http://localhost:%-5d/v1                    ║", port)
+    logger.info("║  模型列表: http://localhost:%-5d/v1/models             ║", port)
+    logger.info("║  管理界面: http://localhost:%-5d/admin                 ║", port)
+    logger.info("║  API 文档: http://localhost:%-5d/docs                  ║", port)
+    logger.info("╠══════════════════════════════════════════════════════════╣")
+    logger.info("║  使用示例:                                                ║")
+    logger.info("║  curl http://localhost:%-5d/v1/models                  ║", port)
+    logger.info("╚══════════════════════════════════════════════════════════╝")
+    logger.info("")
 
 
 if __name__ == "__main__":

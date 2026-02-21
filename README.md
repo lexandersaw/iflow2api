@@ -144,7 +144,26 @@ iflow2api
 ### 自定义端口
 
 ```bash
-python -c "import uvicorn; from iflow2api.app import app; uvicorn.run(app, host='0.0.0.0', port=8001)"
+# 使用命令行参数
+iflow2api --port 28001
+
+# 指定监听地址
+iflow2api --host 0.0.0.0 --port 28001
+
+# 查看帮助
+iflow2api --help
+
+# 查看版本
+iflow2api --version
+```
+
+或修改配置文件 `~/.iflow2api/config.json`：
+
+```json
+{
+  "host": "0.0.0.0",
+  "port": 28001
+}
 ```
 
 ## API 端点
