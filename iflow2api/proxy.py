@@ -101,12 +101,34 @@ class IFlowProxy:
         return headers
 
     async def _get_client(self) -> httpx.AsyncClient:
-        """获取或创建 HTTP 客户端"""
+        """获取或创建 HTTP 客户端
+        
+        代理配置优先级：
+        1. 如果用户配置了 upstream_proxy 且启用，使用用户配置的代理
+        2. 否则，不使用任何代理（trust_env=False），避免被 CC Switch 等工具干扰
+        """
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(300.0, connect=10.0),
-                follow_redirects=True,
-            )
+            # 加载代理配置
+            from .settings import load_settings
+            settings = load_settings()
+            
+            # 配置代理
+            if settings.upstream_proxy_enabled and settings.upstream_proxy:
+                # 使用用户配置的代理
+                proxy = settings.upstream_proxy
+                self._client = httpx.AsyncClient(
+                    timeout=httpx.Timeout(300.0, connect=10.0),
+                    follow_redirects=True,
+                    proxy=proxy,
+                )
+                logger.info("使用上游代理: %s", proxy)
+            else:
+                # 不使用系统代理（解决 CC Switch 等工具的代理冲突问题）
+                self._client = httpx.AsyncClient(
+                    timeout=httpx.Timeout(300.0, connect=10.0),
+                    follow_redirects=True,
+                    trust_env=False,  # 不读取环境变量中的代理设置
+                )
         return self._client
 
     @staticmethod

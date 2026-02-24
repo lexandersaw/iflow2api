@@ -677,6 +677,19 @@ class IFlow2ApiApp:
             hint_text=t("settings.custom_auth_header_hint"),
             width=300,
         )
+        
+        # === 代理设置 ===
+        upstream_proxy_enabled_checkbox = ft.Checkbox(
+            label=t("settings.upstream_proxy_enabled"),
+            value=self.settings.upstream_proxy_enabled,
+        )
+        
+        upstream_proxy_field = ft.TextField(
+            label=t("settings.upstream_proxy"),
+            value=self.settings.upstream_proxy,
+            hint_text=t("settings.upstream_proxy_hint"),
+            width=300,
+        )
 
         def on_save(e):
             """保存设置"""
@@ -718,6 +731,10 @@ class IFlow2ApiApp:
             # 更新自定义 API 鉴权设置
             self.settings.custom_api_key = custom_api_key_field.value or ""
             self.settings.custom_auth_header = custom_auth_header_field.value or ""
+            
+            # 更新代理设置
+            self.settings.upstream_proxy_enabled = upstream_proxy_enabled_checkbox.value
+            self.settings.upstream_proxy = upstream_proxy_field.value or ""
             
             # 应用主题
             self._apply_theme()
@@ -804,6 +821,13 @@ class IFlow2ApiApp:
                 ft.Text(t("settings.section.security"), weight=ft.FontWeight.BOLD, size=14),
                 custom_api_key_field,
                 custom_auth_header_field,
+                
+                ft.Divider(),
+                
+                # 代理设置
+                ft.Text(t("settings.section.proxy"), weight=ft.FontWeight.BOLD, size=14),
+                upstream_proxy_enabled_checkbox,
+                upstream_proxy_field,
             ],
             spacing=10,
         )
@@ -816,7 +840,7 @@ class IFlow2ApiApp:
                     scroll=ft.ScrollMode.AUTO,
                 ),
                 width=400,
-                height=450,
+                height=520,
             ),
             actions=[
                 ft.TextButton(t("button.cancel"), on_click=on_cancel),

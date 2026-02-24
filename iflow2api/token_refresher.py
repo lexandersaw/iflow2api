@@ -1,9 +1,9 @@
 """OAuth token 自动刷新后台任务
 
 刷新策略：
-1. apiKey刷新策略：检查 apiKey 有效日期，小于12小时自动刷新
+1. apiKey刷新策略：检查 apiKey 有效日期，小于24小时自动刷新（与 iflow-cli 一致）
 2. 每6小时检查一次
-3. 增加重试机制：服务器过载时自动重试（重试3次，每次等待15秒）
+3. 增加重试机制：服务器过载时自动重试（重试5次，指数退避）
 4. 刷新失败时给出明确提示
 """
 
@@ -21,10 +21,12 @@ from .config import load_iflow_config, save_iflow_config, IFlowConfig
 
 
 # 刷新配置常量
+# 注意：iflow-cli 使用 24 小时刷新缓冲，我们保持一致
 CHECK_INTERVAL_SECONDS = 6 * 60 * 60  # 每6小时检查一次
-REFRESH_BUFFER_SECONDS = 12 * 60 * 60  # 提前12小时刷新
-RETRY_COUNT = 3  # 重试次数
-RETRY_DELAY_SECONDS = 15  # 重试间隔
+REFRESH_BUFFER_SECONDS = 24 * 60 * 60  # 提前24小时刷新（与 iflow-cli 一致）
+RETRY_COUNT = 5  # 重试次数（增加到5次）
+RETRY_DELAY_SECONDS = 30  # 重试间隔（增加到30秒）
+RETRY_EXPONENTIAL_BACKOFF = True  # 启用指数退避
 
 
 class OAuthTokenRefresher:
@@ -42,9 +44,9 @@ class OAuthTokenRefresher:
 
         Args:
             check_interval: 检查间隔（秒），默认6小时
-            refresh_buffer: 提前刷新的缓冲时间（秒），默认12小时
-            retry_count: 重试次数，默认3次
-            retry_delay: 重试间隔（秒），默认15秒
+            refresh_buffer: 提前刷新的缓冲时间（秒），默认24小时（与 iflow-cli 一致）
+            retry_count: 重试次数，默认5次
+            retry_delay: 重试间隔（秒），默认30秒（启用指数退避）
         """
         self.check_interval = check_interval
         self.refresh_buffer = refresh_buffer
@@ -125,7 +127,7 @@ class OAuthTokenRefresher:
         刷新条件：
         1. 有 refresh_token
         2. 有过期时间
-        3. 距离过期时间小于 refresh_buffer（12小时）
+        3. 距离过期时间小于 refresh_buffer（24小时，与 iflow-cli 一致）
 
         Args:
             config: 当前 iFlow 配置
@@ -184,7 +186,7 @@ class OAuthTokenRefresher:
 
     async def _refresh_token_with_retry(self, config: IFlowConfig) -> bool:
         """
-        带重试机制的 token 刷新
+        带重试机制的 token 刷新（支持指数退避）
 
         Args:
             config: 当前 iFlow 配置
@@ -198,6 +200,8 @@ class OAuthTokenRefresher:
 
         oauth = IFlowOAuth()
         last_error = None
+        # 追踪失败原因：True=服务器临时问题，False=凭证无效等需要重新登录的问题
+        failed_due_to_overload = False
 
         for attempt in range(1, self.retry_count + 1):
             try:
@@ -242,39 +246,79 @@ class OAuthTokenRefresher:
                     error_msg
                 )
 
-                # 检查是否是服务器过载错误（需要重试）
-                is_server_overload = (
-                    "太多" in error_msg 
-                    or "服务器过载" in error_msg 
+                # 检查是否是服务器临时问题（过载、超时、网络等），这类错误 token 本身仍然有效
+                is_transient_error = (
+                    "太多" in error_msg
+                    or "服务器过载" in error_msg
                     or "overload" in error_msg.lower()
+                    or "timeout" in error_msg.lower()
+                    or "timed out" in error_msg.lower()
+                    or "connect" in error_msg.lower()
+                    or "网络" in error_msg
+                    or "503" in error_msg
+                    or "502" in error_msg
+                    or "429" in error_msg
+                )
+                # 检查是否是凭证无效（需要重新登录）
+                is_invalid_grant = (
+                    "invalid_grant" in error_msg
+                    or "invalid_token" in error_msg
+                    or "refresh_token 无效" in error_msg
+                    or "已过期" in error_msg
                 )
 
-                if is_server_overload:
+                if is_transient_error:
+                    failed_due_to_overload = True
                     if attempt < self.retry_count:
-                        logger.info("服务器过载，等待 %d 秒后重试...", self.retry_delay)
-                        await asyncio.sleep(self.retry_delay)
+                        # 指数退避：30s, 60s, 120s, 240s...
+                        delay = self.retry_delay * (2 ** (attempt - 1))
+                        # 最大延迟 5 分钟
+                        delay = min(delay, 300)
+                        logger.info("服务器暂时不可用，等待 %d 秒后重试（指数退避）...", delay)
+                        await asyncio.sleep(delay)
                         continue
+                elif is_invalid_grant:
+                    # 凭证无效，立即停止重试
+                    failed_due_to_overload = False
+                    logger.error("refresh_token 无效或已过期，需要重新登录: %s", error_msg)
+                    break
                 else:
-                    # 其他错误（如 invalid_grant），不需要重试
-                    logger.error("Token 刷新失败，可能需要重新登录: %s", error_msg)
+                    # 未知错误，记录并停止重试
+                    failed_due_to_overload = False
+                    logger.error("Token 刷新遇到未知错误，停止重试: %s", error_msg)
                     break
 
         # 所有重试都失败
         self._failure_count += 1
         self._last_failure_time = datetime.now()
 
-        logger.error(
-            "Token 刷新失败，已重试 %d 次。请手动重新登录 iflow。",
-            self.retry_count
-        )
-
-        # 调用回调通知失败
-        if self._on_refresh_callback:
-            self._on_refresh_callback({
-                "error": True,
-                "message": f"Token 刷新失败: {last_error}",
-                "attempts": self.retry_count
-            })
+        if failed_due_to_overload:
+            # 服务器临时问题，token 本身仍然有效，不需要重新登录
+            logger.warning(
+                "Token 刷新因服务器暂时不可用而失败（已重试 %d 次）。"
+                "现有 token 仍然有效，将在下次定时检查时自动重试。",
+                self.retry_count
+            )
+            if self._on_refresh_callback:
+                self._on_refresh_callback({
+                    "error": True,
+                    "transient": True,
+                    "message": f"服务器暂时不可用，将自动重试: {last_error}",
+                    "attempts": self.retry_count
+                })
+        else:
+            # 凭证问题，需要用户介入
+            logger.error(
+                "Token 刷新失败，已重试 %d 次。请手动重新登录 iflow。",
+                self.retry_count
+            )
+            if self._on_refresh_callback:
+                self._on_refresh_callback({
+                    "error": True,
+                    "transient": False,
+                    "message": f"Token 刷新失败，请重新登录: {last_error}",
+                    "attempts": self.retry_count
+                })
 
         return False
 
@@ -355,7 +399,23 @@ async def check_api_key_validity(api_key: str, base_url: str = "https://apis.ifl
         (是否有效, 错误信息或成功消息)
     """
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        # 加载代理配置
+        from .settings import load_settings
+        settings = load_settings()
+        
+        # 配置代理
+        if settings.upstream_proxy_enabled and settings.upstream_proxy:
+            client = httpx.AsyncClient(
+                timeout=10.0,
+                proxy=settings.upstream_proxy,
+            )
+        else:
+            client = httpx.AsyncClient(
+                timeout=10.0,
+                trust_env=False,  # 不使用系统代理
+            )
+        
+        async with client:
             response = await client.get(
                 f"{base_url}/models",
                 headers={

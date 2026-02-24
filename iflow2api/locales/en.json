@@ -50,7 +50,8 @@
       "api": "Upstream API Settings",
       "appearance": "Appearance",
       "update": "Update Check",
-      "security": "Security Authentication"
+      "security": "Security Authentication",
+      "proxy": "Proxy Settings"
     },
     "api_concurrency": "Concurrency",
     "api_concurrency_hint": "Number of concurrent requests to upstream API (1-10)",
@@ -58,7 +59,10 @@
     "custom_api_key": "API Key",
     "custom_api_key_hint": "Leave empty to disable, clients must provide this key when set",
     "custom_auth_header": "Authorization Header Name",
-    "custom_auth_header_hint": "e.g., Authorization, cs-sk-key, etc."
+    "custom_auth_header_hint": "e.g., Authorization, cs-sk-key, etc.",
+    "upstream_proxy_enabled": "Enable Upstream Proxy",
+    "upstream_proxy": "Proxy Address",
+    "upstream_proxy_hint": "Configure proxy server for accessing upstream iFlow API. Format: http://host:port or socks5://host:port. Leave empty to disable proxy."
   },
   "button": {
     "start": "Start Server",

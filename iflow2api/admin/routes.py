@@ -58,6 +58,9 @@ class SettingsUpdate(BaseModel):
     base_url: Optional[str] = None
     custom_api_key: Optional[str] = None
     custom_auth_header: Optional[str] = None
+    # 上游代理设置
+    upstream_proxy: Optional[str] = None
+    upstream_proxy_enabled: Optional[bool] = None
 
 
 class OAuthCallbackRequest(BaseModel):
@@ -317,6 +320,9 @@ async def get_settings(username: str = Depends(get_current_user)) -> dict[str, A
         "base_url": settings.base_url,
         "custom_api_key": settings.custom_api_key,
         "custom_auth_header": settings.custom_auth_header,
+        # 上游代理设置
+        "upstream_proxy": settings.upstream_proxy,
+        "upstream_proxy_enabled": settings.upstream_proxy_enabled,
         # 不返回 OAuth 敏感信息
     }
 
@@ -363,6 +369,11 @@ async def update_settings(
         settings.custom_api_key = request.custom_api_key
     if request.custom_auth_header is not None:
         settings.custom_auth_header = request.custom_auth_header
+    # 上游代理设置
+    if request.upstream_proxy is not None:
+        settings.upstream_proxy = request.upstream_proxy
+    if request.upstream_proxy_enabled is not None:
+        settings.upstream_proxy_enabled = request.upstream_proxy_enabled
     
     save_settings(settings)
     

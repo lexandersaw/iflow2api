@@ -476,7 +476,7 @@ wheels = [
 
 [[package]]
 name = "iflow2api"
-version = "1.5.10"
+version = "1.6.10"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

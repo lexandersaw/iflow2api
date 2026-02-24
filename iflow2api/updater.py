@@ -118,7 +118,23 @@ async def get_latest_release(timeout: float = 10.0) -> Optional[ReleaseInfo]:
     }
 
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        # 加载代理配置
+        from .settings import load_settings
+        settings = load_settings()
+        
+        # 配置代理
+        if settings.upstream_proxy_enabled and settings.upstream_proxy:
+            client = httpx.AsyncClient(
+                timeout=timeout,
+                proxy=settings.upstream_proxy,
+            )
+        else:
+            client = httpx.AsyncClient(
+                timeout=timeout,
+                trust_env=False,  # 不使用系统代理
+            )
+        
+        async with client:
             response = await client.get(GITHUB_API_URL, headers=headers)
 
             if response.status_code != 200:

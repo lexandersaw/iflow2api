@@ -324,6 +324,10 @@ async function loadSettings() {
         // 填充安全认证设置
         document.getElementById('setting-custom-api-key').value = data.custom_api_key || '';
         document.getElementById('setting-custom-auth-header').value = data.custom_auth_header || '';
+        
+        // 填充代理设置
+        document.getElementById('setting-proxy-enabled').checked = data.upstream_proxy_enabled || false;
+        document.getElementById('setting-proxy-url').value = data.upstream_proxy || '';
 
     } catch (error) {
         console.error('Load settings error:', error);
@@ -356,6 +360,9 @@ async function saveSettings() {
         // 安全认证设置
         custom_api_key: document.getElementById('setting-custom-api-key').value,
         custom_auth_header: document.getElementById('setting-custom-auth-header').value,
+        // 代理设置
+        upstream_proxy_enabled: document.getElementById('setting-proxy-enabled').checked,
+        upstream_proxy: document.getElementById('setting-proxy-url').value,
     };
 
     try {

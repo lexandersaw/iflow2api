@@ -61,6 +61,12 @@ class AppSettings(BaseModel):
     custom_api_key: str = ""
     custom_auth_header: str = ""
 
+    # 上游代理设置
+    # 用于访问 iFlow API 时通过代理服务器
+    # 格式: "http://host:port" 或 "socks5://host:port"
+    upstream_proxy: str = ""
+    upstream_proxy_enabled: bool = False
+
 
 # lazy singleton for token encryption
 _config_encryption: Optional[ConfigEncryption] = None
@@ -169,6 +175,11 @@ def load_settings() -> AppSettings:
                     settings.custom_api_key = data["custom_api_key"]
                 if "custom_auth_header" in data:
                     settings.custom_auth_header = data["custom_auth_header"]
+                # 上游代理设置
+                if "upstream_proxy" in data:
+                    settings.upstream_proxy = data["upstream_proxy"]
+                if "upstream_proxy_enabled" in data:
+                    settings.upstream_proxy_enabled = data["upstream_proxy_enabled"]
         except Exception as _e:
             logger.warning("读取应用配置文件失败: %s", _e)
 
@@ -236,6 +247,9 @@ def save_settings(settings: AppSettings) -> None:
         # 自定义 API 鉴权设置
         "custom_api_key": settings.custom_api_key,
         "custom_auth_header": settings.custom_auth_header,
+        # 上游代理设置
+        "upstream_proxy": settings.upstream_proxy,
+        "upstream_proxy_enabled": settings.upstream_proxy_enabled,
     }
 
     config_path = get_config_path()

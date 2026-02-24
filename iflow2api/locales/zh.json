@@ -50,7 +50,8 @@
       "api": "上游 API 设置",
       "appearance": "外观设置",
       "update": "更新检查",
-      "security": "安全认证"
+      "security": "安全认证",
+      "proxy": "代理设置"
     },
     "api_concurrency": "并发数",
     "api_concurrency_hint": "上游 API 同时处理的请求数量（1-10）",
@@ -58,7 +59,10 @@
     "custom_api_key": "API 密钥",
     "custom_api_key_hint": "留空则不验证，设置后客户端需携带此密钥",
     "custom_auth_header": "授权标头名称",
-    "custom_auth_header_hint": "如：Authorization, cs-sk-key 等"
+    "custom_auth_header_hint": "如：Authorization, cs-sk-key 等",
+    "upstream_proxy_enabled": "启用上游代理",
+    "upstream_proxy": "代理地址",
+    "upstream_proxy_hint": "配置代理服务器地址，用于访问上游 iFlow API。格式：http://host:port 或 socks5://host:port。留空则不使用代理。"
   },
   "button": {
     "start": "启动服务",

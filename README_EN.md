@@ -219,6 +219,36 @@ iflow2api provides an independent web admin interface for remote management:
 
 ## Advanced Configuration
 
+### Proxy Settings
+
+If you need to access the iFlow API through a proxy (e.g., when using tools like CC Switch), you can configure an upstream proxy.
+
+**Background**: Some tools (like CC Switch) set system proxy environment variables, causing iflow2api's requests to be incorrectly routed, resulting in 502 errors.
+
+**Configuration**
+
+In the GUI application: Click the "App Settings" button, find the "Proxy Settings" section:
+- Check "Enable Upstream Proxy"
+- Enter the proxy address, e.g., `http://127.0.0.1:7890` or `socks5://127.0.0.1:1080`
+
+Or edit the configuration file `~/.iflow2api/config.json`:
+
+```json
+{
+  "upstream_proxy_enabled": true,
+  "upstream_proxy": "http://127.0.0.1:7890"
+}
+```
+
+**Configuration Options**
+
+| Option                    | Description                                          |
+| ------------------------- | ---------------------------------------------------- |
+| `upstream_proxy_enabled` | Enable proxy, default `false`                      |
+| `upstream_proxy`         | Proxy address, supports `http://` and `socks5://` protocols |
+
+> **Note**: By default, iflow2api does not read system proxy environment variables (`HTTP_PROXY`/`HTTPS_PROXY`) to avoid conflicts with local proxy tools. Only when you explicitly configure a proxy will the specified proxy server be used.
+
 ### Chain of Thought (CoT) Settings
 
 Some models (such as GLM-5, Kimi-K2-Thinking) support Chain of Thought functionality, returning a `reasoning_content` field in the response that shows the model's reasoning process.

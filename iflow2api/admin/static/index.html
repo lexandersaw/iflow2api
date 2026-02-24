@@ -300,6 +300,26 @@
 
                     <div class="card">
                         <div class="card-header">
+                            <span class="icon">🔗</span>
+                            <span>代理设置</span>
+                        </div>
+                        <div class="card-body">
+                            <form id="proxy-settings-form">
+                                <div class="form-group checkbox">
+                                    <input type="checkbox" id="setting-proxy-enabled" name="upstream_proxy_enabled">
+                                    <label for="setting-proxy-enabled">启用上游代理</label>
+                                </div>
+                                <div class="form-group">
+                                    <label for="setting-proxy-url">代理地址</label>
+                                    <input type="text" id="setting-proxy-url" name="upstream_proxy" placeholder="http://127.0.0.1:7890">
+                                </div>
+                                <p class="hint">配置代理服务器地址，用于访问上游 iFlow API。格式：http://host:port 或 socks5://host:port。留空则不使用代理。</p>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
                             <span class="icon">🔒</span>
                             <span>安全认证设置</span>
                         </div>

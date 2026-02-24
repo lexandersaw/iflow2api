@@ -200,7 +200,23 @@ async def fetch_image_as_base64(url: str, timeout: float = 30.0) -> tuple[str, s
     Raises:
         httpx.HTTPError: 如果请求失败
     """
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    # 加载代理配置
+    from .settings import load_settings
+    settings = load_settings()
+    
+    # 配置代理
+    if settings.upstream_proxy_enabled and settings.upstream_proxy:
+        client = httpx.AsyncClient(
+            timeout=timeout,
+            proxy=settings.upstream_proxy,
+        )
+    else:
+        client = httpx.AsyncClient(
+            timeout=timeout,
+            trust_env=False,  # 不使用系统代理
+        )
+    
+    async with client:
         response = await client.get(url)
         response.raise_for_status()
         

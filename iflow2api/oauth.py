@@ -21,12 +21,33 @@ class IFlowOAuth:
         self._client: Optional[httpx.AsyncClient] = None
 
     async def _get_client(self) -> httpx.AsyncClient:
-        """获取或创建 HTTP 客户端"""
+        """获取或创建 HTTP 客户端
+        
+        代理配置优先级：
+        1. 如果用户配置了 upstream_proxy 且启用，使用用户配置的代理
+        2. 否则，不使用任何代理（trust_env=False），避免被 CC Switch 等工具干扰
+        """
         if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(30.0, connect=10.0),
-                follow_redirects=True,
-            )
+            # 加载代理配置
+            from .settings import load_settings
+            settings = load_settings()
+            
+            # 配置代理
+            if settings.upstream_proxy_enabled and settings.upstream_proxy:
+                # 使用用户配置的代理
+                proxy = settings.upstream_proxy
+                self._client = httpx.AsyncClient(
+                    timeout=httpx.Timeout(30.0, connect=10.0),
+                    follow_redirects=True,
+                    proxy=proxy,
+                )
+            else:
+                # 不使用系统代理
+                self._client = httpx.AsyncClient(
+                    timeout=httpx.Timeout(30.0, connect=10.0),
+                    follow_redirects=True,
+                    trust_env=False,
+                )
         return self._client
 
     async def close(self):

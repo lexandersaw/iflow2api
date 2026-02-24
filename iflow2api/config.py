@@ -52,6 +52,23 @@ def get_installation_id_path() -> Path:
     return home / ".iflow" / "installation_id"
 
 
+def _decrypt_sensitive_fields(data: dict) -> dict:
+    """解密配置中的敏感字段
+    
+    Args:
+        data: 原始配置字典
+        
+    Returns:
+        解密后的配置字典
+    """
+    from .crypto import ConfigEncryption
+    
+    encryption = ConfigEncryption()
+    if encryption.is_available:
+        return encryption.decrypt_dict(data)
+    return data
+
+
 def load_iflow_config() -> IFlowConfig:
     """
     从 iFlow CLI 配置文件加载认证信息
@@ -75,6 +92,9 @@ def load_iflow_config() -> IFlowConfig:
             data = json.load(f)
     except json.JSONDecodeError as e:
         raise ValueError(f"iFlow 配置文件格式错误: {e}")
+
+    # 解密敏感字段（如 oauth_refresh_token）
+    data = _decrypt_sensitive_fields(data)
 
     # 检查认证类型
     auth_type = data.get("selectedAuthType", "")
