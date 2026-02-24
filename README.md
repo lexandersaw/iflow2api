@@ -22,7 +22,7 @@ pip install iflow2api
 
 ```bash
 iflow2api          # 命令行模式
-iflow2api-gui      # GUI 模式
+iflow2api.gui      # GUI 模式
 ```
 
 ### 从源码安装

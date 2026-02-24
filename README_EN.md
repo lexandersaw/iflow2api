@@ -22,7 +22,7 @@ After installation, you can use:
 
 ```bash
 iflow2api          # CLI mode
-iflow2api-gui      # GUI mode
+iflow2api.gui      # GUI mode
 ```
 
 ### Install from Source
@@ -71,25 +71,25 @@ pip install -e .
 
 ### Text Models
 
-| Model ID               | Name              | Description                       |
-| ---------------------- | ----------------- | --------------------------------- |
-| `glm-4.6`             | GLM-4.6           | Zhipu GLM-4.6                     |
-| `glm-4.7`             | GLM-4.7           | Zhipu GLM-4.7                     |
-| `glm-5`               | GLM-5             | Zhipu GLM-5 (Recommended)         |
-| `iFlow-ROME-30BA3B`   | iFlow-ROME-30BA3B | iFlow ROME 30B (Fast)             |
-| `deepseek-v3.2-chat`  | DeepSeek-V3.2     | DeepSeek V3.2 Chat Model          |
-| `qwen3-coder-plus`    | Qwen3-Coder-Plus  | Tongyi Qianwen Qwen3 Coder Plus   |
-| `kimi-k2`             | Kimi-K2           | Moonshot Kimi K2                  |
-| `kimi-k2-thinking`    | Kimi-K2-Thinking  | Moonshot Kimi K2 Thinking Model   |
-| `kimi-k2.5`           | Kimi-K2.5         | Moonshot Kimi K2.5                |
-| `kimi-k2-0905`        | Kimi-K2-0905      | Moonshot Kimi K2 0905             |
-| `minimax-m2.5`        | MiniMax-M2.5      | MiniMax M2.5                      |
+| Model ID               | Name              | Description                     |
+| ---------------------- | ----------------- | ------------------------------- |
+| `glm-4.6`            | GLM-4.6           | Zhipu GLM-4.6                   |
+| `glm-4.7`            | GLM-4.7           | Zhipu GLM-4.7                   |
+| `glm-5`              | GLM-5             | Zhipu GLM-5 (Recommended)       |
+| `iFlow-ROME-30BA3B`  | iFlow-ROME-30BA3B | iFlow ROME 30B (Fast)           |
+| `deepseek-v3.2-chat` | DeepSeek-V3.2     | DeepSeek V3.2 Chat Model        |
+| `qwen3-coder-plus`   | Qwen3-Coder-Plus  | Tongyi Qianwen Qwen3 Coder Plus |
+| `kimi-k2`            | Kimi-K2           | Moonshot Kimi K2                |
+| `kimi-k2-thinking`   | Kimi-K2-Thinking  | Moonshot Kimi K2 Thinking Model |
+| `kimi-k2.5`          | Kimi-K2.5         | Moonshot Kimi K2.5              |
+| `kimi-k2-0905`       | Kimi-K2-0905      | Moonshot Kimi K2 0905           |
+| `minimax-m2.5`       | MiniMax-M2.5      | MiniMax M2.5                    |
 
 ### Vision Models
 
-| Model ID               | Name              | Description                       |
-| ---------------------- | ----------------- | --------------------------------- |
-| `qwen-vl-max`         | Qwen-VL-Max       | Tongyi Qianwen VL Max Vision Model |
+| Model ID        | Name        | Description                        |
+| --------------- | ----------- | ---------------------------------- |
+| `qwen-vl-max` | Qwen-VL-Max | Tongyi Qianwen VL Max Vision Model |
 
 > Model list is sourced from iflow-cli source code and may change with iFlow updates.
 
@@ -168,17 +168,17 @@ Or edit the configuration file `~/.iflow2api/config.json`:
 
 ## API Endpoints
 
-| Endpoint                  | Method | Description                                         |
-| ------------------------- | ------ | --------------------------------------------------- |
-| `/health`               | GET    | Health check                                        |
-| `/v1/models`            | GET    | Get available model list                            |
-| `/v1/chat/completions`  | POST   | Chat Completions API (OpenAI format)                |
-| `/v1/messages`          | POST   | Messages API (Anthropic format, Claude Code compatible) |
-| `/models`               | GET    | Compatible endpoint (without /v1 prefix)            |
-| `/chat/completions`     | POST   | Compatible endpoint (without /v1 prefix)            |
-| `/docs`                 | GET    | Swagger UI API Documentation                        |
-| `/redoc`                | GET    | ReDoc API Documentation                             |
-| `/admin`                | GET    | Web Admin Interface                                 |
+| Endpoint                 | Method | Description                                             |
+| ------------------------ | ------ | ------------------------------------------------------- |
+| `/health`              | GET    | Health check                                            |
+| `/v1/models`           | GET    | Get available model list                                |
+| `/v1/chat/completions` | POST   | Chat Completions API (OpenAI format)                    |
+| `/v1/messages`         | POST   | Messages API (Anthropic format, Claude Code compatible) |
+| `/models`              | GET    | Compatible endpoint (without /v1 prefix)                |
+| `/chat/completions`    | POST   | Compatible endpoint (without /v1 prefix)                |
+| `/docs`                | GET    | Swagger UI API Documentation                            |
+| `/redoc`               | GET    | ReDoc API Documentation                                 |
+| `/admin`               | GET    | Web Admin Interface                                     |
 
 ## Docker Deployment
 
@@ -211,6 +211,7 @@ iflow2api provides an independent web admin interface for remote management:
 - Default username/password: `admin` / `admin`
 
 **Features**:
+
 - Real-time service status monitoring
 - Multi-instance management
 - Remote start/stop services
@@ -234,14 +235,15 @@ Edit the configuration file `~/.iflow2api/config.json`:
 
 **Configuration Options**
 
-| Value | Behavior | Use Case |
-| ----- | -------- | -------- |
-| `false` (default) | Merges `reasoning_content` into the `content` field | OpenAI-compatible clients that only need the final answer |
-| `true` | Preserves `reasoning_content` field, also copies to `content` | Clients that need to display reasoning process and answer separately |
+| Value               | Behavior                                                          | Use Case                                                             |
+| ------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `false` (default) | Merges `reasoning_content` into the `content` field           | OpenAI-compatible clients that only need the final answer            |
+| `true`            | Preserves `reasoning_content` field, also copies to `content` | Clients that need to display reasoning process and answer separately |
 
 **Response Format Comparison**
 
 Default mode (`preserve_reasoning_content: false`):
+
 ```json
 {
   "choices": [{
@@ -253,6 +255,7 @@ Default mode (`preserve_reasoning_content: false`):
 ```
 
 Preserve mode (`preserve_reasoning_content: true`):
+
 ```json
 {
   "choices": [{
