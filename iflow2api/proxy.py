@@ -4,9 +4,11 @@ import hmac
 import hashlib
 import json
 import logging
+import os
 import re
 import time
 import uuid
+import secrets
 
 import httpx
 from typing import AsyncIterator, Literal, Optional, overload
@@ -51,53 +53,73 @@ class IFlowProxy:
         self.base_url = config.base_url.rstrip("/")
         self._client: Optional[httpx.AsyncClient] = None
         # 保持会话一致性
-        self._session_id = str(uuid.uuid4())
+        # 与 iflow-cli 的观测结果保持一致：session-id 使用 session- 前缀
+        self._session_id = f"session-{uuid.uuid4()}"
         self._conversation_id = str(uuid.uuid4())
+
+    @staticmethod
+    def _generate_traceparent() -> str:
+        """生成 W3C Trace Context 的 traceparent。"""
+        # 00-<32hex trace_id>-<16hex parent_id>-01
+        trace_id = secrets.token_hex(16)
+        parent_id = secrets.token_hex(8)
+        return f"00-{trace_id}-{parent_id}-01"
+
+    def _is_aone_endpoint(self) -> bool:
+        """是否为 Aone 端点（iflow-cli 在此分支追加额外头）。"""
+        return "ducky.code.alibaba-inc.com" in self.base_url.lower()
 
     def _get_headers(self, stream: bool = False) -> dict:
         """
-        获取请求头
-        
-        模仿 iFlow CLI 的请求头设置:
-        - user-agent: iFlow-Cli
-        - session-id: 会话ID
-        - conversation-id: 对话ID
-        - x-iflow-signature: HMAC-SHA256 签名
-        - x-iflow-timestamp: 时间戳(毫秒)
-        
-        注意: iFlow CLI 不使用 installation-id 请求头，移除以保持兼容
-        
+        获取请求头（按 iflow-cli 0.5.13 关键特征对齐）。
+
+        关键字段：
+        - Content-Type
+        - Authorization
+        - user-agent
+        - session-id
+        - conversation-id
+        - x-iflow-signature
+        - x-iflow-timestamp
+        - traceparent
+        - Aone 分支: X-Client-Type / X-Client-Version
+
         Args:
-            stream: 是否流式请求，流式请求时不设置 Accept 头以避免上游返回 JSON
+            stream: 是否流式（保留参数以兼容现有调用）
         """
+        _ = stream
+
         timestamp = int(time.time() * 1000)  # 毫秒时间戳
-        
+
+        # 注意：按 iflow-cli 观测结果，user-agent 使用小写键名。
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.config.api_key}",
-            "User-Agent": IFLOW_CLI_USER_AGENT,
+            "user-agent": IFLOW_CLI_USER_AGENT,
             "session-id": self._session_id,
             "conversation-id": self._conversation_id,
         }
-        
-        # 非流式请求设置 Accept 头，流式请求不设置以让上游返回 SSE
-        if not stream:
-            headers["Accept"] = "application/json"
-        
-        # 注意: iFlow CLI 不使用 installation-id 请求头
-        # 移除以保持与上游 API 兼容
-        
-        # 添加签名
+
+        # HMAC 签名：`${userAgent}:${sessionId}:${timestamp}`
         signature = generate_signature(
             IFLOW_CLI_USER_AGENT,
             self._session_id,
             timestamp,
-            self.config.api_key
+            self.config.api_key,
         )
         if signature:
             headers["x-iflow-signature"] = signature
             headers["x-iflow-timestamp"] = str(timestamp)
-        
+
+        # iflow-cli 中 traceparent 为“有则传”的可选头。
+        # 这里默认注入合法值，提高网络特征一致性。
+        headers["traceparent"] = self._generate_traceparent()
+
+        # Aone 分支专有头。
+        if self._is_aone_endpoint():
+            headers["X-Client-Type"] = "iflow-cli"
+            headers["X-Client-Version"] = "0.5.13"
+
         return headers
 
     async def _get_client(self) -> httpx.AsyncClient:
@@ -221,6 +243,34 @@ class IFlowProxy:
             # 如果只有 content 有值，不需要处理，直接保留
         
         return chunk_data
+
+    @staticmethod
+    def _align_official_body_defaults(request_body: dict, stream: bool = False) -> dict:
+        """
+        对齐 iflow-cli 的通用请求体默认参数。
+
+        观测到官方 CLI 在 chat/completions 会补齐：
+        - max_new_tokens
+        - temperature
+        - top_p
+        - tools（即使为空数组）
+
+        并且不会把 transport 层的 stream 字段透传给上游 body。
+        """
+        body = request_body.copy()
+
+        # 官方行为：流式请求会携带 stream=true；非流式不携带该字段
+        body.pop("stream", None)
+        if stream:
+            body["stream"] = True
+
+        # 官方默认参数（来源于官方 CLI 抓包 + bundle 配置）
+        body.setdefault("temperature", 0.7)
+        body.setdefault("top_p", 0.95)
+        body.setdefault("max_new_tokens", 8192)
+        body.setdefault("tools", [])
+
+        return body
 
     @staticmethod
     def _configure_model_request(request_body: dict, model: str) -> dict:
@@ -466,6 +516,9 @@ class IFlowProxy:
         settings = load_settings()
         preserve_reasoning = settings.preserve_reasoning_content
         
+        # 先对齐官方通用默认参数，再按模型补充特定参数
+        request_body = self._align_official_body_defaults(request_body, stream=stream)
+
         # 为特定模型添加必要的请求参数
         # 来源: iFlow CLI 源码中的模型配置
         # GLM-5 等思考模型需要 enable_thinking 参数才能正常工作
