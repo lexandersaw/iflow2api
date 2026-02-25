@@ -67,6 +67,12 @@ class AppSettings(BaseModel):
     upstream_proxy: str = ""
     upstream_proxy_enabled: bool = False
 
+    # 上游传输层配置（用于 TLS 指纹对齐）
+    # - httpx: 使用 Python/OpenSSL 默认 TLS 栈
+    # - curl_cffi: 使用 curl-impersonate，可伪装为 Chrome/Node 风格握手
+    upstream_transport_backend: str = "curl_cffi"
+    tls_impersonate: str = "chrome124"
+
 
 # lazy singleton for token encryption
 _config_encryption: Optional[ConfigEncryption] = None
@@ -180,6 +186,11 @@ def load_settings() -> AppSettings:
                     settings.upstream_proxy = data["upstream_proxy"]
                 if "upstream_proxy_enabled" in data:
                     settings.upstream_proxy_enabled = data["upstream_proxy_enabled"]
+                # 上游传输层设置（TLS 指纹对齐）
+                if "upstream_transport_backend" in data:
+                    settings.upstream_transport_backend = data["upstream_transport_backend"]
+                if "tls_impersonate" in data:
+                    settings.tls_impersonate = data["tls_impersonate"]
         except Exception as _e:
             logger.warning("读取应用配置文件失败: %s", _e)
 
@@ -250,6 +261,9 @@ def save_settings(settings: AppSettings) -> None:
         # 上游代理设置
         "upstream_proxy": settings.upstream_proxy,
         "upstream_proxy_enabled": settings.upstream_proxy_enabled,
+        # 上游传输层设置（TLS 指纹对齐）
+        "upstream_transport_backend": settings.upstream_transport_backend,
+        "tls_impersonate": settings.tls_impersonate,
     }
 
     config_path = get_config_path()

@@ -44,3 +44,4 @@ nul
 *.log
 TODO.md
 .tmp-iflow-cli
+tests/

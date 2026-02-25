@@ -4,21 +4,28 @@ import hmac
 import hashlib
 import json
 import logging
-import os
 import re
 import time
 import uuid
 import secrets
+import platform
+import urllib.parse
 
-import httpx
 from typing import AsyncIterator, Literal, Optional, overload
 from .config import IFlowConfig
+from .transport import BaseUpstreamTransport, create_upstream_transport
 
 logger = logging.getLogger("iflow2api")
 
 
 # iFlow CLI 特殊 User-Agent，用于解锁更多模型
 IFLOW_CLI_USER_AGENT = "iFlow-Cli"
+IFLOW_CLI_VERSION = "0.5.13"
+
+MMSTAT_GM_BASE = "https://gm.mmstat.com"
+MMSTAT_VGIF_URL = "https://log.mmstat.com/v.gif"
+IFLOW_USERINFO_URL = "https://iflow.cn/api/oauth/getUserInfo"
+NODE_VERSION_EMULATED = "v22.22.0"
 
 
 def generate_signature(user_agent: str, session_id: str, timestamp: int, api_key: str) -> str | None:
@@ -51,11 +58,12 @@ class IFlowProxy:
     def __init__(self, config: IFlowConfig):
         self.config = config
         self.base_url = config.base_url.rstrip("/")
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: Optional[BaseUpstreamTransport] = None
         # 保持会话一致性
         # 与 iflow-cli 的观测结果保持一致：session-id 使用 session- 前缀
         self._session_id = f"session-{uuid.uuid4()}"
         self._conversation_id = str(uuid.uuid4())
+        self._telemetry_user_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, config.api_key or self._session_id))
 
     @staticmethod
     def _generate_traceparent() -> str:
@@ -69,7 +77,7 @@ class IFlowProxy:
         """是否为 Aone 端点（iflow-cli 在此分支追加额外头）。"""
         return "ducky.code.alibaba-inc.com" in self.base_url.lower()
 
-    def _get_headers(self, stream: bool = False) -> dict:
+    def _get_headers(self, stream: bool = False, traceparent: Optional[str] = None) -> dict:
         """
         获取请求头（按 iflow-cli 0.5.13 关键特征对齐）。
 
@@ -86,6 +94,7 @@ class IFlowProxy:
 
         Args:
             stream: 是否流式（保留参数以兼容现有调用）
+            traceparent: 可选，显式指定 traceparent 以对齐埋点 trace_id
         """
         _ = stream
 
@@ -98,6 +107,10 @@ class IFlowProxy:
             "user-agent": IFLOW_CLI_USER_AGENT,
             "session-id": self._session_id,
             "conversation-id": self._conversation_id,
+            "accept": "*/*",
+            "accept-language": "*",
+            "sec-fetch-mode": "cors",
+            "accept-encoding": "br, gzip, deflate",
         }
 
         # HMAC 签名：`${userAgent}:${sessionId}:${timestamp}`
@@ -112,45 +125,150 @@ class IFlowProxy:
             headers["x-iflow-timestamp"] = str(timestamp)
 
         # iflow-cli 中 traceparent 为“有则传”的可选头。
-        # 这里默认注入合法值，提高网络特征一致性。
-        headers["traceparent"] = self._generate_traceparent()
+        # 同一轮请求链路中需复用同一个 traceparent（chat + telemetry）。
+        headers["traceparent"] = traceparent or self._generate_traceparent()
 
         # Aone 分支专有头。
         if self._is_aone_endpoint():
             headers["X-Client-Type"] = "iflow-cli"
-            headers["X-Client-Version"] = "0.5.13"
+            headers["X-Client-Version"] = IFLOW_CLI_VERSION
 
         return headers
 
-    async def _get_client(self) -> httpx.AsyncClient:
-        """获取或创建 HTTP 客户端
-        
-        代理配置优先级：
-        1. 如果用户配置了 upstream_proxy 且启用，使用用户配置的代理
-        2. 否则，不使用任何代理（trust_env=False），避免被 CC Switch 等工具干扰
-        """
-        if self._client is None or self._client.is_closed:
+    @staticmethod
+    def _extract_trace_id(traceparent: str) -> str:
+        parts = traceparent.split("-")
+        if len(parts) == 4 and len(parts[1]) == 32:
+            return parts[1]
+        return secrets.token_hex(16)
+
+    @staticmethod
+    def _rand_observation_id() -> str:
+        return secrets.token_hex(8)
+
+    async def _telemetry_post_gm(self, path: str, gokey: str) -> None:
+        """发送 gm.mmstat 事件（run_started / run_error）。"""
+        try:
+            client = await self._get_client()
+            await client.post(
+                f"{MMSTAT_GM_BASE}{path}",
+                headers={
+                    "Content-Type": "application/json",
+                    "accept": "*/*",
+                    "accept-language": "*",
+                    "sec-fetch-mode": "cors",
+                    "user-agent": "node",
+                    "accept-encoding": "br, gzip, deflate",
+                },
+                json_body={"gmkey": "AI", "gokey": gokey},
+                timeout=10.0,
+            )
+        except Exception as e:
+            logger.debug("mmstat gm event failed (%s): %s", path, e)
+
+    async def _telemetry_post_vgif(self) -> None:
+        """发送 log.mmstat.com/v.gif 事件（简化版）。"""
+        try:
+            client = await self._get_client()
+            payload = {
+                "logtype": "1",
+                "title": "iFlow-CLI",
+                "pre": "-",
+                "platformType": "pc",
+                "device_model": platform.system(),
+                "os": platform.system(),
+                "o": "win" if platform.system().lower().startswith("win") else platform.system().lower(),
+                "node_version": NODE_VERSION_EMULATED,
+                "language": "zh_CN.UTF-8",
+                "interactive": "0",
+                "iFlowEnv": "",
+                "_g_encode": "utf-8",
+                "pid": "iflow",
+                "_user_id": self._telemetry_user_id,
+            }
+            await client.post(
+                MMSTAT_VGIF_URL,
+                headers={
+                    "content-type": "text/plain;charset=UTF-8",
+                    "cache-control": "no-cache",
+                    "accept": "*/*",
+                    "accept-language": "*",
+                    "sec-fetch-mode": "cors",
+                    "user-agent": "node",
+                    "accept-encoding": "br, gzip, deflate",
+                },
+                data=urllib.parse.urlencode(payload),
+                timeout=10.0,
+            )
+        except Exception as e:
+            logger.debug("mmstat v.gif failed: %s", e)
+
+    async def _emit_run_started(self, model: str, trace_id: str) -> str:
+        observation_id = self._rand_observation_id()
+        gokey = (
+            f"pid=iflow"
+            f"&sam=iflow.cli.{self._conversation_id}.{trace_id}"
+            f"&trace_id={trace_id}"
+            f"&session_id={self._session_id}"
+            f"&conversation_id={self._conversation_id}"
+            f"&observation_id={observation_id}"
+            f"&model={urllib.parse.quote(model or '')}"
+            f"&tool="
+            f"&user_id={self._telemetry_user_id}"
+        )
+        await self._telemetry_post_gm("//aitrack.lifecycle.run_started", gokey)
+        await self._telemetry_post_vgif()
+        return observation_id
+
+    async def _emit_run_error(self, model: str, trace_id: str, parent_observation_id: str, error_msg: str) -> None:
+        observation_id = self._rand_observation_id()
+        gokey = (
+            f"pid=iflow"
+            f"&sam=iflow.cli.{self._conversation_id}.{trace_id}"
+            f"&trace_id={trace_id}"
+            f"&observation_id={observation_id}"
+            f"&parent_observation_id={parent_observation_id}"
+            f"&session_id={self._session_id}"
+            f"&conversation_id={self._conversation_id}"
+            f"&user_id={self._telemetry_user_id}"
+            f"&error_msg={urllib.parse.quote(error_msg)}"
+            f"&model={urllib.parse.quote(model or '')}"
+            f"&tool="
+            f"&toolName="
+            f"&toolArgs="
+            f"&cliVer={IFLOW_CLI_VERSION}"
+            f"&platform={urllib.parse.quote(platform.system().lower())}"
+            f"&arch={urllib.parse.quote(platform.machine().lower())}"
+            f"&nodeVersion={urllib.parse.quote(NODE_VERSION_EMULATED)}"
+            f"&osVersion={urllib.parse.quote(platform.platform())}"
+        )
+        await self._telemetry_post_gm("//aitrack.lifecycle.run_error", gokey)
+
+    async def _get_client(self) -> BaseUpstreamTransport:
+        """获取或创建上游传输层客户端。"""
+        if self._client is None:
             # 加载代理配置
             from .settings import load_settings
             settings = load_settings()
-            
-            # 配置代理
-            if settings.upstream_proxy_enabled and settings.upstream_proxy:
-                # 使用用户配置的代理
-                proxy = settings.upstream_proxy
-                self._client = httpx.AsyncClient(
-                    timeout=httpx.Timeout(300.0, connect=10.0),
-                    follow_redirects=True,
-                    proxy=proxy,
-                )
+
+            proxy = settings.upstream_proxy if settings.upstream_proxy_enabled and settings.upstream_proxy else None
+            self._client = create_upstream_transport(
+                backend=settings.upstream_transport_backend,
+                timeout=300.0,
+                follow_redirects=True,
+                proxy=proxy,
+                trust_env=False,
+                impersonate=settings.tls_impersonate,
+            )
+
+            if proxy:
                 logger.info("使用上游代理: %s", proxy)
-            else:
-                # 不使用系统代理（解决 CC Switch 等工具的代理冲突问题）
-                self._client = httpx.AsyncClient(
-                    timeout=httpx.Timeout(300.0, connect=10.0),
-                    follow_redirects=True,
-                    trust_env=False,  # 不读取环境变量中的代理设置
-                )
+            logger.info(
+                "上游传输层: backend=%s, tls_impersonate=%s",
+                settings.upstream_transport_backend,
+                settings.tls_impersonate,
+            )
+
         return self._client
 
     @staticmethod
@@ -391,8 +509,8 @@ class IFlowProxy:
 
     async def close(self):
         """关闭 HTTP 客户端"""
-        if self._client and not self._client.is_closed:
-            await self._client.aclose()
+        if self._client:
+            await self._client.close()
             self._client = None
 
     async def get_models(self) -> dict:
@@ -525,13 +643,22 @@ class IFlowProxy:
         model = request_body.get("model", "")
         request_body = self._configure_model_request(request_body, model)
 
+        # 统一 trace 链路：同一轮 run_started/chat/run_error 复用同一个 trace_id
+        traceparent = self._generate_traceparent()
+        trace_id = self._extract_trace_id(traceparent)
+        parent_observation_id = ""
+        try:
+            parent_observation_id = await self._emit_run_started(model, trace_id)
+        except Exception as e:
+            logger.debug("emit run_started failed: %s", e)
+
         if stream:
             # 对于流式请求，使用 httpx 的 stream 方法实现真正的流式传输
             # 注意：不能使用 await client.post()，因为它会等待整个响应体下载完成
             async def stream_generator():
                 buffer = b""
                 chunk_count = 0
-                headers = self._get_headers(stream=True)
+                headers = self._get_headers(stream=True, traceparent=traceparent)
                 
                 # 调试：打印请求详情
                 logger.debug("流式请求 URL: %s/chat/completions", self.base_url)
@@ -546,8 +673,8 @@ class IFlowProxy:
                         "POST",
                         f"{self.base_url}/chat/completions",
                         headers=headers,
-                        json=request_body,
-                        timeout=httpx.Timeout(300.0, connect=10.0),
+                        json_body=request_body,
+                        timeout=300.0,
                     ) as response:
                         # 检查状态码
                         response.raise_for_status()
@@ -567,7 +694,13 @@ class IFlowProxy:
                                 error_msg = error_data.get("msg") or error_data.get("error", {}).get("message") or body_str[:200]
                             except json.JSONDecodeError:
                                 error_msg = body_str[:200] or "上游返回空响应"
-                            
+
+                            if parent_observation_id:
+                                try:
+                                    await self._emit_run_error(model, trace_id, parent_observation_id, error_msg)
+                                except Exception as telemetry_err:
+                                    logger.debug("emit run_error failed: %s", telemetry_err)
+
                             # 生成一个包含错误信息的 SSE chunk
                             error_chunk = {
                                 "id": f"error-{int(time.time())}",
@@ -629,6 +762,11 @@ class IFlowProxy:
                                 
                 except Exception as e:
                     logger.error("流式请求错误: %s", e)
+                    if parent_observation_id:
+                        try:
+                            await self._emit_run_error(model, trace_id, parent_observation_id, str(e))
+                        except Exception as telemetry_err:
+                            logger.debug("emit run_error failed: %s", telemetry_err)
                     raise
                 finally:
                     if chunk_count == 0:
@@ -638,28 +776,37 @@ class IFlowProxy:
             
             return stream_generator()
         else:
-            response = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=self._get_headers(),
-                json=request_body,
-            )
-            response.raise_for_status()
-            result = response.json()
+            try:
+                response = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=self._get_headers(traceparent=traceparent),
+                    json_body=request_body,
+                    timeout=300.0,
+                )
+                response.raise_for_status()
+                result = response.json()
 
-            # 确保 usage 统计信息存在 (OpenAI 兼容)
-            if "usage" not in result:
-                result["usage"] = {
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "total_tokens": 0,
-                }
+                # 确保 usage 统计信息存在 (OpenAI 兼容)
+                if "usage" not in result:
+                    result["usage"] = {
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": 0,
+                    }
 
-            # 规范化响应: 确保 content 字段有效
-            # GLM-5 等推理模型可能只返回 reasoning_content 而 content 为 null
-            # OpenAI 兼容客户端（如 Kilo Code）只检查 content 字段
-            result = self._normalize_response(result, preserve_reasoning)
+                # 规范化响应: 确保 content 字段有效
+                # GLM-5 等推理模型可能只返回 reasoning_content 而 content 为 null
+                # OpenAI 兼容客户端（如 Kilo Code）只检查 content 字段
+                result = self._normalize_response(result, preserve_reasoning)
 
-            return result
+                return result
+            except Exception as e:
+                if parent_observation_id:
+                    try:
+                        await self._emit_run_error(model, trace_id, parent_observation_id, str(e))
+                    except Exception as telemetry_err:
+                        logger.debug("emit run_error failed: %s", telemetry_err)
+                raise
 
     async def proxy_request(
         self,
@@ -684,15 +831,15 @@ class IFlowProxy:
         url = f"{self.base_url}{path}"
 
         if stream and method.upper() == "POST":
-            # 使用 httpx 的 stream 方法实现真正的流式传输
+            # 使用统一传输层的 stream 方法实现真正的流式传输
             async def stream_gen():
                 try:
                     async with client.stream(
                         "POST",
                         url,
                         headers=self._get_headers(stream=True),
-                        json=body,
-                        timeout=httpx.Timeout(300.0, connect=10.0),
+                        json_body=body,
+                        timeout=300.0,
                     ) as response:
                         response.raise_for_status()
                         async for chunk in response.aiter_bytes():
@@ -703,13 +850,22 @@ class IFlowProxy:
             return stream_gen()
 
         if method.upper() == "GET":
-            response = await client.get(url, headers=self._get_headers())
+            response = await client.get(url, headers=self._get_headers(), timeout=300.0)
         elif method.upper() in ("POST", "PUT", "PATCH"):
             response = await client.request(
-                method.upper(), url, headers=self._get_headers(), json=body
+                method.upper(),
+                url,
+                headers=self._get_headers(),
+                json_body=body,
+                timeout=300.0,
             )
         elif method.upper() == "DELETE":
-            response = await client.delete(url, headers=self._get_headers())
+            response = await client.request(
+                "DELETE",
+                url,
+                headers=self._get_headers(),
+                timeout=300.0,
+            )
         else:
             raise ValueError(f"不支持的 HTTP 方法: {method}")
 

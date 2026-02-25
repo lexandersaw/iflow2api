@@ -2,9 +2,10 @@
 
 import base64
 import secrets
-import httpx
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
+
+from .transport import BaseUpstreamTransport, create_upstream_transport
 
 
 class IFlowOAuth:
@@ -18,42 +19,29 @@ class IFlowOAuth:
     AUTH_URL = "https://iflow.cn/oauth"
 
     def __init__(self):
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: Optional[BaseUpstreamTransport] = None
 
-    async def _get_client(self) -> httpx.AsyncClient:
-        """获取或创建 HTTP 客户端
-        
-        代理配置优先级：
-        1. 如果用户配置了 upstream_proxy 且启用，使用用户配置的代理
-        2. 否则，不使用任何代理（trust_env=False），避免被 CC Switch 等工具干扰
-        """
-        if self._client is None or self._client.is_closed:
-            # 加载代理配置
+    async def _get_client(self) -> BaseUpstreamTransport:
+        """获取或创建上游传输层客户端。"""
+        if self._client is None:
             from .settings import load_settings
+
             settings = load_settings()
-            
-            # 配置代理
-            if settings.upstream_proxy_enabled and settings.upstream_proxy:
-                # 使用用户配置的代理
-                proxy = settings.upstream_proxy
-                self._client = httpx.AsyncClient(
-                    timeout=httpx.Timeout(30.0, connect=10.0),
-                    follow_redirects=True,
-                    proxy=proxy,
-                )
-            else:
-                # 不使用系统代理
-                self._client = httpx.AsyncClient(
-                    timeout=httpx.Timeout(30.0, connect=10.0),
-                    follow_redirects=True,
-                    trust_env=False,
-                )
+            proxy = settings.upstream_proxy if settings.upstream_proxy_enabled and settings.upstream_proxy else None
+            self._client = create_upstream_transport(
+                backend=settings.upstream_transport_backend,
+                timeout=30.0,
+                follow_redirects=True,
+                proxy=proxy,
+                trust_env=False,
+                impersonate=settings.tls_impersonate,
+            )
         return self._client
 
     async def close(self):
         """关闭 HTTP 客户端"""
-        if self._client and not self._client.is_closed:
-            await self._client.aclose()
+        if self._client:
+            await self._client.close()
             self._client = None
 
     async def get_token(
@@ -70,7 +58,6 @@ class IFlowOAuth:
             包含 access_token, refresh_token, expires_in 等字段的字典
 
         Raises:
-            httpx.HTTPError: HTTP 请求失败
             ValueError: 响应数据格式错误
         """
         client = await self._get_client()
@@ -95,6 +82,7 @@ class IFlowOAuth:
                 "Authorization": f"Basic {credentials}",
                 "User-Agent": "iFlow-Cli",
             },
+            timeout=30.0,
         )
         response.raise_for_status()
 
@@ -135,6 +123,7 @@ class IFlowOAuth:
                 "Authorization": f"Basic {credentials}",
                 "User-Agent": "iFlow-Cli",
             },
+            timeout=30.0,
         )
 
         if response.status_code == 400:
@@ -176,7 +165,6 @@ class IFlowOAuth:
             用户信息字典
 
         Raises:
-            httpx.HTTPError: HTTP 请求失败
             ValueError: 响应数据格式错误或 access_token 无效
         """
         client = await self._get_client()
@@ -189,6 +177,7 @@ class IFlowOAuth:
                 "Accept": "application/json",
                 "User-Agent": "iFlow-Cli",
             },
+            timeout=30.0,
         )
 
         if response.status_code == 401:
@@ -235,7 +224,7 @@ class IFlowOAuth:
         try:
             await self.get_user_info(access_token)
             return True
-        except (httpx.HTTPError, ValueError):
+        except Exception:
             return False
 
     def is_token_expired(

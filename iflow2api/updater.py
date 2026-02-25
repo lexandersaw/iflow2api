@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
-import httpx
+from .transport import create_upstream_transport
 
 # GitHub 仓库信息
 GITHUB_REPO = "cacaview/iflow2api"
@@ -117,46 +117,51 @@ async def get_latest_release(timeout: float = 10.0) -> Optional[ReleaseInfo]:
         "User-Agent": f"iflow2api/{get_current_version()}",
     }
 
+    client = None
     try:
-        # 加载代理配置
+        # 加载代理与传输层配置
         from .settings import load_settings
+
         settings = load_settings()
-        
-        # 配置代理
-        if settings.upstream_proxy_enabled and settings.upstream_proxy:
-            client = httpx.AsyncClient(
-                timeout=timeout,
-                proxy=settings.upstream_proxy,
-            )
-        else:
-            client = httpx.AsyncClient(
-                timeout=timeout,
-                trust_env=False,  # 不使用系统代理
-            )
-        
-        async with client:
-            response = await client.get(GITHUB_API_URL, headers=headers)
+        proxy = settings.upstream_proxy if settings.upstream_proxy_enabled and settings.upstream_proxy else None
 
-            if response.status_code != 200:
-                return None
+        client = create_upstream_transport(
+            backend=settings.upstream_transport_backend,
+            timeout=timeout,
+            follow_redirects=True,
+            proxy=proxy,
+            trust_env=False,
+            impersonate=settings.tls_impersonate,
+        )
 
-            data = response.json()
+        response = await client.get(GITHUB_API_URL, headers=headers, timeout=timeout)
 
-            # 解析发布时间
-            published_at = datetime.fromisoformat(
-                data["published_at"].replace("Z", "+00:00")
-            )
+        if response.status_code != 200:
+            return None
 
-            return ReleaseInfo(
-                version=data["tag_name"].lstrip("v"),
-                tag_name=data["tag_name"],
-                html_url=data["html_url"],
-                published_at=published_at,
-                body=data.get("body", ""),
-                prerelease=data.get("prerelease", False),
-            )
+        data = response.json()
+
+        # 解析发布时间
+        published_at = datetime.fromisoformat(
+            data["published_at"].replace("Z", "+00:00")
+        )
+
+        return ReleaseInfo(
+            version=data["tag_name"].lstrip("v"),
+            tag_name=data["tag_name"],
+            html_url=data["html_url"],
+            published_at=published_at,
+            body=data.get("body", ""),
+            prerelease=data.get("prerelease", False),
+        )
     except Exception:
         return None
+    finally:
+        if client is not None:
+            try:
+                await client.close()
+            except Exception:
+                pass
 
 
 async def check_for_updates(

@@ -11,9 +11,10 @@
 
 import base64
 import hashlib
-import httpx
 from typing import Optional, Union, Any
 from dataclasses import dataclass
+
+from .transport import create_upstream_transport
 
 
 # 支持视觉功能的模型列表
@@ -189,48 +190,51 @@ def image_to_base64(data: bytes, media_type: str = "image/png") -> str:
 async def fetch_image_as_base64(url: str, timeout: float = 30.0) -> tuple[str, str]:
     """
     从 URL 获取图像并转换为 Base64
-    
+
     Args:
         url: 图像 URL
         timeout: 超时时间（秒）
-    
+
     Returns:
         (base64_data, media_type) 元组
-    
-    Raises:
-        httpx.HTTPError: 如果请求失败
     """
-    # 加载代理配置
-    from .settings import load_settings
-    settings = load_settings()
-    
-    # 配置代理
-    if settings.upstream_proxy_enabled and settings.upstream_proxy:
-        client = httpx.AsyncClient(
+    client = None
+    try:
+        # 加载代理与传输层配置
+        from .settings import load_settings
+
+        settings = load_settings()
+        proxy = settings.upstream_proxy if settings.upstream_proxy_enabled and settings.upstream_proxy else None
+
+        client = create_upstream_transport(
+            backend=settings.upstream_transport_backend,
             timeout=timeout,
-            proxy=settings.upstream_proxy,
+            follow_redirects=True,
+            proxy=proxy,
+            trust_env=False,
+            impersonate=settings.tls_impersonate,
         )
-    else:
-        client = httpx.AsyncClient(
-            timeout=timeout,
-            trust_env=False,  # 不使用系统代理
-        )
-    
-    async with client:
-        response = await client.get(url)
+
+        response = await client.get(url, timeout=timeout)
         response.raise_for_status()
-        
+
         # 从 Content-Type 获取媒体类型
         content_type = response.headers.get("content-type", "image/png")
         # 移除可能的额外参数（如 charset）
         media_type = content_type.split(";")[0].strip()
-        
+
         # 验证是否为图像类型
         if not media_type.startswith("image/"):
             media_type = "image/png"  # 默认
-        
+
         data = base64.b64encode(response.content).decode("utf-8")
         return data, media_type
+    finally:
+        if client is not None:
+            try:
+                await client.close()
+            except Exception:
+                pass
 
 
 def convert_to_openai_format(images: list[ImageData]) -> list[dict]:

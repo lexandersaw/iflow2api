@@ -10,7 +10,6 @@
 import asyncio
 import logging
 import threading
-import httpx
 from datetime import datetime, timedelta
 from typing import Optional, Callable, Tuple
 
@@ -18,6 +17,7 @@ logger = logging.getLogger("iflow2api")
 
 from .oauth import IFlowOAuth
 from .config import load_iflow_config, save_iflow_config, IFlowConfig
+from .transport import create_upstream_transport
 
 
 # 刷新配置常量
@@ -398,43 +398,50 @@ async def check_api_key_validity(api_key: str, base_url: str = "https://apis.ifl
     Returns:
         (是否有效, 错误信息或成功消息)
     """
+    client = None
     try:
-        # 加载代理配置
+        # 加载代理与传输层配置
         from .settings import load_settings
+
         settings = load_settings()
-        
-        # 配置代理
-        if settings.upstream_proxy_enabled and settings.upstream_proxy:
-            client = httpx.AsyncClient(
-                timeout=10.0,
-                proxy=settings.upstream_proxy,
-            )
-        else:
-            client = httpx.AsyncClient(
-                timeout=10.0,
-                trust_env=False,  # 不使用系统代理
-            )
-        
-        async with client:
-            response = await client.get(
-                f"{base_url}/models",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "User-Agent": "iFlow-Cli",
-                }
-            )
+        proxy = settings.upstream_proxy if settings.upstream_proxy_enabled and settings.upstream_proxy else None
 
-            if response.status_code == 200:
-                return True, "API Key 有效"
-            elif response.status_code == 401:
-                return False, "API Key 无效或已过期"
-            else:
-                return False, f"API 返回错误: {response.status_code}"
+        client = create_upstream_transport(
+            backend=settings.upstream_transport_backend,
+            timeout=10.0,
+            follow_redirects=True,
+            proxy=proxy,
+            trust_env=False,
+            impersonate=settings.tls_impersonate,
+        )
 
-    except httpx.TimeoutException:
-        return False, "API 请求超时"
+        response = await client.get(
+            f"{base_url}/models",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "User-Agent": "iFlow-Cli",
+            },
+            timeout=10.0,
+        )
+
+        if response.status_code == 200:
+            return True, "API Key 有效"
+        if response.status_code == 401:
+            return False, "API Key 无效或已过期"
+        return False, f"API 返回错误: {response.status_code}"
+
     except Exception as e:
+        # 含超时在内统一处理，避免绑定具体 HTTP 客户端异常类型
+        msg = str(e).lower()
+        if "timeout" in msg or "timed out" in msg:
+            return False, "API 请求超时"
         return False, f"检查失败: {str(e)}"
+    finally:
+        if client is not None:
+            try:
+                await client.close()
+            except Exception:
+                pass
 
 
 # 全局刷新器实例
