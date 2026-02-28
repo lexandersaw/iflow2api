@@ -1,4 +1,9 @@
-"""iFlow OAuth 认证实现"""
+"""iFlow OAuth 认证实现
+
+CPA (Client Protocol Attributes) 特征对齐：
+- OAuth 请求头使用 node User-Agent
+- getUserInfo 请求头顺序对齐 iflow-cli
+"""
 
 import base64
 import secrets
@@ -6,6 +11,10 @@ from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 
 from .transport import BaseUpstreamTransport, create_upstream_transport
+from .cpa import (
+    NODE_USER_AGENT,
+    build_oauth_headers,
+)
 
 
 class IFlowOAuth:
@@ -158,6 +167,10 @@ class IFlowOAuth:
         """
         获取用户信息（包含 API Key）
 
+        使用 CPA 模块构建请求头，确保：
+        - User-Agent 为 "node"（非 iFlow-Cli）
+        - 请求头顺序与 iflow-cli 一致
+
         Args:
             access_token: 访问令牌
 
@@ -169,14 +182,16 @@ class IFlowOAuth:
         """
         client = await self._get_client()
 
+        # 使用 CPA 模块构建 OAuth 请求头
+        headers_list = build_oauth_headers(host="iflow.cn")
+        headers = dict(headers_list)
+        headers["Accept"] = "application/json"  # OAuth 需要 Accept 头
+
         # iFlow API 要求 accessToken 作为 URL 查询参数传递
         # 参考 iflow-cli 实现
         response = await client.get(
             f"{self.USER_INFO_URL}?accessToken={access_token}",
-            headers={
-                "Accept": "application/json",
-                "User-Agent": "iFlow-Cli",
-            },
+            headers=headers,
             timeout=30.0,
         )
 

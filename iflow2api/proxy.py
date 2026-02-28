@@ -1,4 +1,10 @@
-"""API 代理服务 - 转发请求到 iFlow API"""
+"""API 代理服务 - 转发请求到 iFlow API
+
+CPA (Client Protocol Attributes) 特征对齐：
+- 请求头顺序和大小写严格对齐 iflow-cli 0.5.13
+- 遥测参数完整性对齐
+- 基于 mitmproxy 抓包数据分析实现
+"""
 
 import hmac
 import hashlib
@@ -14,18 +20,31 @@ import urllib.parse
 from typing import AsyncIterator, Literal, Optional, overload
 from .config import IFlowConfig
 from .transport import BaseUpstreamTransport, create_upstream_transport
+from .cpa import (
+    # Constants
+    IFLOW_CLI_USER_AGENT,
+    IFLOW_CLI_VERSION,
+    NODE_VERSION_EMULATED,
+    MMSTAT_GM_BASE,
+    MMSTAT_VGIF_URL,
+    CHAT_API_HEADER_ORDER,
+    # Headers
+    build_chat_headers,
+    build_telemetry_headers,
+    build_vgif_headers,
+    # Telemetry
+    build_run_started_gokey,
+    build_run_error_gokey,
+    build_vgif_payload,
+    generate_observation_id,
+    generate_user_id_from_api_key,
+)
 
 logger = logging.getLogger("iflow2api")
 
 
-# iFlow CLI 特殊 User-Agent，用于解锁更多模型
-IFLOW_CLI_USER_AGENT = "iFlow-Cli"
-IFLOW_CLI_VERSION = "0.5.13"
-
-MMSTAT_GM_BASE = "https://gm.mmstat.com"
-MMSTAT_VGIF_URL = "https://log.mmstat.com/v.gif"
+# 保留常量以供 Aone 端点检测等使用
 IFLOW_USERINFO_URL = "https://iflow.cn/api/oauth/getUserInfo"
-NODE_VERSION_EMULATED = "v22.22.0"
 
 
 def generate_signature(user_agent: str, session_id: str, timestamp: int, api_key: str) -> str | None:
@@ -63,7 +82,8 @@ class IFlowProxy:
         # 与 iflow-cli 的观测结果保持一致：session-id 使用 session- 前缀
         self._session_id = f"session-{uuid.uuid4()}"
         self._conversation_id = str(uuid.uuid4())
-        self._telemetry_user_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, config.api_key or self._session_id))
+        # 使用 CPA 模块生成用户 ID
+        self._telemetry_user_id = generate_user_id_from_api_key(config.api_key or self._session_id)
 
     @staticmethod
     def _generate_traceparent() -> str:
@@ -79,18 +99,12 @@ class IFlowProxy:
 
     def _get_headers(self, stream: bool = False, traceparent: Optional[str] = None) -> dict:
         """
-        获取请求头（按 iflow-cli 0.5.13 关键特征对齐）。
+        获取请求头（按 iflow-cli 0.5.13 抓包顺序严格对齐）。
 
-        关键字段：
-        - Content-Type
-        - Authorization
-        - user-agent
-        - session-id
-        - conversation-id
-        - x-iflow-signature
-        - x-iflow-timestamp
-        - traceparent
-        - Aone 分支: X-Client-Type / X-Client-Version
+        使用 CPA 模块构建有序请求头，确保：
+        - 头部顺序与 iflow-cli 一致
+        - 头部大小写与 iflow-cli 一致
+        - 包含所有必要字段
 
         Args:
             stream: 是否流式（保留参数以兼容现有调用）
@@ -100,19 +114,6 @@ class IFlowProxy:
 
         timestamp = int(time.time() * 1000)  # 毫秒时间戳
 
-        # 注意：按 iflow-cli 观测结果，user-agent 使用小写键名。
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.config.api_key}",
-            "user-agent": IFLOW_CLI_USER_AGENT,
-            "session-id": self._session_id,
-            "conversation-id": self._conversation_id,
-            "accept": "*/*",
-            "accept-language": "*",
-            "sec-fetch-mode": "cors",
-            "accept-encoding": "br, gzip, deflate",
-        }
-
         # HMAC 签名：`${userAgent}:${sessionId}:${timestamp}`
         signature = generate_signature(
             IFLOW_CLI_USER_AGENT,
@@ -120,13 +121,27 @@ class IFlowProxy:
             timestamp,
             self.config.api_key,
         )
-        if signature:
-            headers["x-iflow-signature"] = signature
-            headers["x-iflow-timestamp"] = str(timestamp)
+        signature_str = signature or ""
 
-        # iflow-cli 中 traceparent 为“有则传”的可选头。
+        # iflow-cli 中 traceparent 为"有则传"的可选头。
         # 同一轮请求链路中需复用同一个 traceparent（chat + telemetry）。
-        headers["traceparent"] = traceparent or self._generate_traceparent()
+        traceparent_str = traceparent or self._generate_traceparent()
+
+        # 使用 CPA 模块构建有序请求头
+        # 注意：content-length 在发送时由 HTTP 客户端自动计算
+        headers_list = build_chat_headers(
+            host=self._extract_host(),
+            api_key=self.config.api_key or "",
+            session_id=self._session_id,
+            conversation_id=self._conversation_id,
+            signature=signature_str,
+            timestamp=str(timestamp),
+            traceparent=traceparent_str,
+            content_length=0,  # HTTP 客户端会自动设置
+        )
+
+        # 转换为字典
+        headers = dict(headers_list)
 
         # Aone 分支专有头。
         if self._is_aone_endpoint():
@@ -134,6 +149,12 @@ class IFlowProxy:
             headers["X-Client-Version"] = IFLOW_CLI_VERSION
 
         return headers
+
+    def _extract_host(self) -> str:
+        """从 base_url 提取主机名。"""
+        from urllib.parse import urlparse
+        parsed = urlparse(self.base_url)
+        return parsed.netloc
 
     @staticmethod
     def _extract_trace_id(traceparent: str) -> str:
@@ -144,103 +165,92 @@ class IFlowProxy:
 
     @staticmethod
     def _rand_observation_id() -> str:
-        return secrets.token_hex(8)
+        """生成观测 ID（使用 CPA 模块）。"""
+        return generate_observation_id()
 
     async def _telemetry_post_gm(self, path: str, gokey: str) -> None:
-        """发送 gm.mmstat 事件（run_started / run_error）。"""
+        """发送 gm.mmstat 事件（run_started / run_error）- 使用 CPA 请求头。"""
         try:
             client = await self._get_client()
+            # 计算 content-length
+            body = {"gmkey": "AI", "gokey": gokey}
+            body_bytes = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+            # 使用 CPA 模块构建遥测请求头
+            headers_list = build_telemetry_headers(
+                host="gm.mmstat.com",
+                content_length=len(body_bytes),
+            )
+            headers = dict(headers_list)
+
             await client.post(
                 f"{MMSTAT_GM_BASE}{path}",
-                headers={
-                    "Content-Type": "application/json",
-                    "accept": "*/*",
-                    "accept-language": "*",
-                    "sec-fetch-mode": "cors",
-                    "user-agent": "node",
-                    "accept-encoding": "br, gzip, deflate",
-                },
-                json_body={"gmkey": "AI", "gokey": gokey},
+                headers=headers,
+                json_body=body,
                 timeout=10.0,
             )
         except Exception as e:
             logger.debug("mmstat gm event failed (%s): %s", path, e)
 
     async def _telemetry_post_vgif(self) -> None:
-        """发送 log.mmstat.com/v.gif 事件（简化版）。"""
+        """发送 log.mmstat.com/v.gif 事件 - 使用 CPA 完整参数。"""
         try:
             client = await self._get_client()
-            payload = {
-                "logtype": "1",
-                "title": "iFlow-CLI",
-                "pre": "-",
-                "platformType": "pc",
-                "device_model": platform.system(),
-                "os": platform.system(),
-                "o": "win" if platform.system().lower().startswith("win") else platform.system().lower(),
-                "node_version": NODE_VERSION_EMULATED,
-                "language": "zh_CN.UTF-8",
-                "interactive": "0",
-                "iFlowEnv": "",
-                "_g_encode": "utf-8",
-                "pid": "iflow",
-                "_user_id": self._telemetry_user_id,
-            }
+            # 使用 CPA 模块构建完整的 v.gif 参数
+            payload = build_vgif_payload(
+                user_id=self._telemetry_user_id,
+                cna="",  # 可从 cookie 获取，当前为空
+                screen_resolution="1920x1080",
+            )
+            payload_bytes = payload.encode("utf-8")
+
+            # 使用 CPA 模块构建 v.gif 请求头
+            headers_list = build_vgif_headers(
+                host="log.mmstat.com",
+                content_length=len(payload_bytes),
+            )
+            headers = dict(headers_list)
+
             await client.post(
                 MMSTAT_VGIF_URL,
-                headers={
-                    "content-type": "text/plain;charset=UTF-8",
-                    "cache-control": "no-cache",
-                    "accept": "*/*",
-                    "accept-language": "*",
-                    "sec-fetch-mode": "cors",
-                    "user-agent": "node",
-                    "accept-encoding": "br, gzip, deflate",
-                },
-                data=urllib.parse.urlencode(payload),
+                headers=headers,
+                data=payload,
                 timeout=10.0,
             )
         except Exception as e:
             logger.debug("mmstat v.gif failed: %s", e)
 
     async def _emit_run_started(self, model: str, trace_id: str) -> str:
-        observation_id = self._rand_observation_id()
-        gokey = (
-            f"pid=iflow"
-            f"&sam=iflow.cli.{self._conversation_id}.{trace_id}"
-            f"&trace_id={trace_id}"
-            f"&session_id={self._session_id}"
-            f"&conversation_id={self._conversation_id}"
-            f"&observation_id={observation_id}"
-            f"&model={urllib.parse.quote(model or '')}"
-            f"&tool="
-            f"&user_id={self._telemetry_user_id}"
+        """发送 run_started 事件 - 使用 CPA 模块。"""
+        observation_id = generate_observation_id()
+        gokey = build_run_started_gokey(
+            trace_id=trace_id,
+            observation_id=observation_id,
+            session_id=self._session_id,
+            conversation_id=self._conversation_id,
+            user_id=self._telemetry_user_id,
+            model=model or "",
+            tool="",
         )
         await self._telemetry_post_gm("//aitrack.lifecycle.run_started", gokey)
         await self._telemetry_post_vgif()
         return observation_id
 
     async def _emit_run_error(self, model: str, trace_id: str, parent_observation_id: str, error_msg: str) -> None:
-        observation_id = self._rand_observation_id()
-        gokey = (
-            f"pid=iflow"
-            f"&sam=iflow.cli.{self._conversation_id}.{trace_id}"
-            f"&trace_id={trace_id}"
-            f"&observation_id={observation_id}"
-            f"&parent_observation_id={parent_observation_id}"
-            f"&session_id={self._session_id}"
-            f"&conversation_id={self._conversation_id}"
-            f"&user_id={self._telemetry_user_id}"
-            f"&error_msg={urllib.parse.quote(error_msg)}"
-            f"&model={urllib.parse.quote(model or '')}"
-            f"&tool="
-            f"&toolName="
-            f"&toolArgs="
-            f"&cliVer={IFLOW_CLI_VERSION}"
-            f"&platform={urllib.parse.quote(platform.system().lower())}"
-            f"&arch={urllib.parse.quote(platform.machine().lower())}"
-            f"&nodeVersion={urllib.parse.quote(NODE_VERSION_EMULATED)}"
-            f"&osVersion={urllib.parse.quote(platform.platform())}"
+        """发送 run_error 事件 - 使用 CPA 模块完整参数。"""
+        observation_id = generate_observation_id()
+        gokey = build_run_error_gokey(
+            trace_id=trace_id,
+            observation_id=observation_id,
+            parent_observation_id=parent_observation_id,
+            session_id=self._session_id,
+            conversation_id=self._conversation_id,
+            user_id=self._telemetry_user_id,
+            error_msg=error_msg,
+            model=model or "",
+            tool="",
+            tool_name="",
+            tool_args="",
         )
         await self._telemetry_post_gm("//aitrack.lifecycle.run_error", gokey)
 
